@@ -1,21 +1,28 @@
-// One-shot: create the schema, seed the 124 items, create the first owner login.
+// One-shot: create the schema, seed the 124 items, create a login.
 // Safe to re-run — the schema is `if not exists`, items upsert, the user is skipped if taken.
 //
-//   node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>"
+//   node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>" [owner|staff]
+//
+// Role defaults to owner. Also the way to reset a forgotten password: disable the old
+// account in Manage, then create a fresh one here.
 
 import { neon } from "@neondatabase/serverless";
 import { readFileSync } from "node:fs";
 import { randomBytes, scryptSync } from "node:crypto";
 
-// With no arguments: schema + items only. With arguments: also create the owner login.
-const [username, password, name] = process.argv.slice(2);
+// With no arguments: schema + items only. With arguments: also create the login.
+const [username, password, name, role = "owner"] = process.argv.slice(2);
 const makeUser = Boolean(username || password || name);
 if (makeUser && (!username || !password || !name)) {
-  console.error('usage: node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>"');
+  console.error('usage: node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>" [owner|staff]');
   process.exit(1);
 }
 if (makeUser && password.length < 8) {
   console.error("password must be at least 8 characters");
+  process.exit(1);
+}
+if (makeUser && role !== "owner" && role !== "staff") {
+  console.error(`role must be "owner" or "staff", got "${role}"`);
   process.exit(1);
 }
 if (!process.env.DATABASE_URL) {
@@ -60,8 +67,8 @@ if (makeUser) {
     const hash = `${salt.toString("hex")}:${scryptSync(password, salt, 64).toString("hex")}`;
     await sql`
       insert into users (username, name, password_hash, role)
-      values (${un}, ${name.trim()}, ${hash}, 'owner')`;
-    console.log(`owner "${un}" created`);
+      values (${un}, ${name.trim()}, ${hash}, ${role})`;
+    console.log(`${role} "${un}" created`);
   }
 } else {
   const [{ count }] = await sql`select count(*) from users`;
