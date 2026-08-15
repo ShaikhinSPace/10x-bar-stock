@@ -86,6 +86,21 @@ try {
     /violates check constraint/, "category must be one of the nine"
   );
 
+  // --- hashes written by the scripts must verify the way src/lib/auth.ts verifies ---
+  // Mirrors verifyPassword() exactly; if the two drift apart, logins break silently.
+  const { hashPassword } = await import("./hash.mjs");
+  const { scryptSync, timingSafeEqual } = await import("node:crypto");
+  const authVerify = (pw, stored) => {
+    const [saltHex, keyHex] = stored.split(":");
+    if (!saltHex || !keyHex) return false;
+    const expected = Buffer.from(keyHex, "hex");
+    return timingSafeEqual(expected, scryptSync(pw, Buffer.from(saltHex, "hex"), expected.length));
+  };
+  const stored = hashPassword("correct horse battery");
+  assert.ok(authVerify("correct horse battery", stored), "auth.ts must accept a script-written hash");
+  assert.ok(!authVerify("wrong password", stored), "a wrong password must be rejected");
+  assert.notEqual(stored, hashPassword("correct horse battery"), "each hash needs its own salt");
+
   console.log("all checks passed");
 } finally {
   await sql`delete from moves where item_name = ${NAME}`;

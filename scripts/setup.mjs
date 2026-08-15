@@ -8,7 +8,7 @@
 
 import { neon } from "@neondatabase/serverless";
 import { readFileSync } from "node:fs";
-import { randomBytes, scryptSync } from "node:crypto";
+import { hashPassword } from "./hash.mjs";
 
 // With no arguments: schema + items only. With arguments: also create the login.
 const [username, password, name, role = "owner"] = process.argv.slice(2);
@@ -63,11 +63,9 @@ if (makeUser) {
   if (existing.length) {
     console.log(`user "${un}" already exists — left alone`);
   } else {
-    const salt = randomBytes(16);
-    const hash = `${salt.toString("hex")}:${scryptSync(password, salt, 64).toString("hex")}`;
     await sql`
       insert into users (username, name, password_hash, role)
-      values (${un}, ${name.trim()}, ${hash}, ${role})`;
+      values (${un}, ${name.trim()}, ${hashPassword(password)}, ${role})`;
     console.log(`${role} "${un}" created`);
   }
 } else {
