@@ -1,0 +1,90 @@
+# 10X Bar — Stock Control
+
+Storeroom and bar stock control for 10X Bar. Replaces the
+`10X_Bar_Stock_Management.xlsx` workbook.
+
+The point is catching leakage between what leaves the storeroom and what each bar
+actually has — so everything is tracked per location (Store / Patio Bar / Back Bar)
+rather than as one total.
+
+- **Store** counts whole, unopened bottles.
+- **Patio Bar** and **Back Bar** count partials (`0.25`, `1.87`), matching how the
+  bar sheets in the workbook were kept.
+
+Next.js 16 (App Router) · React 19 · Neon Postgres · deployed on Vercel.
+
+## Running it locally
+
+```bash
+npm install
+cp .env.example .env.local     # then fill in both values
+node --env-file=.env.local scripts/setup.mjs            # schema + 124 items
+node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>"   # first owner
+npm run dev
+```
+
+`SESSION_SECRET` signs the login cookie — generate one with `openssl rand -hex 32`.
+Use a **different** value in Vercel than locally.
+
+`scripts/setup.mjs` is safe to re-run: the schema is `if not exists`, items are
+`on conflict do nothing`, and an existing username is left alone.
+
+## Checks
+
+```bash
+node --env-file=.env.local scripts/check.mjs   # SQL semantics + DB constraints
+npx tsc --noEmit && npx eslint . && npx next build
+```
+
+`check.mjs` runs against the real database and cleans up after itself. It covers the
+parts that would silently corrupt stock: the read-before-write CTEs, the refusal to
+give out more than the storeroom holds, partials surviving a bar count, and the
+CHECK constraints (store stays whole, nothing goes negative).
+
+## Deploying to Vercel
+
+1. Push to GitHub.
+2. Import the repo in Vercel.
+3. Add `DATABASE_URL` and `SESSION_SECRET` under Settings → Environment Variables.
+4. Deploy. The schema and seed only need running once, against the same Neon
+   database, from your machine.
+
+## Roles
+
+| | Give out / Receive / Count | Undo own entry | Manage bottles & staff |
+|---|---|---|---|
+| **staff** | yes | yes | no |
+| **owner** | yes | any entry | yes |
+
+Only the newest entry for a bottle can be undone — reversing an older one would
+clobber whatever was logged after it. Correct an older mistake with a **Count**.
+
+## Where the data came from
+
+`src/lib/seed-items.json` is generated from the workbook's `Inventory` sheet
+(the *Current Stock* column, which nets opening + in − out), plus five SKUs that
+only ever appeared on the bar sheets:
+
+`TAAKA`, `KENTUCKY GENTLEMAN`, `BLUE ICE`, `BARTON NATURALS`, `CALYPSO SILVER` —
+seeded at store 0, since the storeroom is simply out of them.
+
+Three bar-sheet names were merged as misspellings of storeroom items:
+`JAGERMEISTER`→`JAEGERMEISTER`, `SCREWBALL`→`SKREWBALL`, `BUCANA`→`BUCHANAN`.
+
+Bars start at zero. Staff enter real bar counts with the **Count** action.
+
+## Known gaps
+
+- **Reorder levels are guesses.** The workbook left the column blank for all 119
+  items, so this seeds 2 (24 for beer). That currently flags 55 items as needing
+  reorder on day one, which is noise until the real levels are set in Manage.
+- **Two bar SKUs were left out**: the bar sheets list a bare `CASAMIGOS` and a bare
+  `DON JULIO`, but the storeroom carries two Casamigos and five Don Julio variants.
+  Rather than guess a merge, neither was added — add them in Manage if the bars
+  genuinely hold an unlabelled bottle.
+- **The bar sheets double-counted.** Rows 35–45 of `Patio Bar` are identical to rows
+  37–47 of `Back Bar`, and 8 of those 11 already appear higher up the Patio sheet.
+  Since bars start at zero, none of it was imported — but it is worth knowing the
+  old bar numbers were unreliable.
+- **No "reset all".** The old single-file version had one. Against a shared database
+  with a real audit trail, it is a footgun; archive bottles in Manage instead.
