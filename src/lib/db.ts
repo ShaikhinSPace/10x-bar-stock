@@ -2,8 +2,12 @@ import "server-only";
 import { neon } from "@neondatabase/serverless";
 import type { Item, Move } from "./model";
 
+// Thrown at module load, so a missing value fails the build rather than every request.
 if (!process.env.DATABASE_URL) {
-  throw new Error("DATABASE_URL is not set — copy .env.example to .env.local");
+  throw new Error(
+    "DATABASE_URL is not set. Locally: copy .env.example to .env.local. " +
+      "On Vercel: Settings > Environment Variables, then redeploy."
+  );
 }
 
 export const sql = neon(process.env.DATABASE_URL);

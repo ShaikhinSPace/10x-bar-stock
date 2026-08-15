@@ -9,7 +9,10 @@ import type { SessionUser } from "./model";
 
 const SECRET = process.env.SESSION_SECRET;
 if (!SECRET || SECRET.length < 32) {
-  throw new Error("SESSION_SECRET must be set to at least 32 chars — see .env.example");
+  throw new Error(
+    "SESSION_SECRET must be set to at least 32 characters (openssl rand -hex 32). " +
+      "Locally: .env.local. On Vercel: Settings > Environment Variables, then redeploy."
+  );
 }
 
 const COOKIE = "bar_session";
