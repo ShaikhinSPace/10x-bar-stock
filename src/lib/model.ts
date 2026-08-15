@@ -41,5 +41,20 @@ export type Staff = {
 export const fmt = (n: number) =>
   Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
 
+/** Everything this bottle has, across all three locations. */
+export const totalOf = (i: Item) => i.store + i.patio + i.back;
+
+/**
+ * Mixers (juices, syrups, salt, Tajin) are consumables nobody walks off with, and
+ * they were 11 of the 55 day-one alerts. They stay out of every reorder surface —
+ * a mixer at zero still shows OUT on the Stock tab, it just doesn't raise an alert.
+ *
+ * Reorder is measured against the STORE only: you reorder from the supplier into
+ * the storeroom, not into a bar.
+ */
+export const NO_REORDER_ALERTS: readonly Cat[] = ["MIXER"];
+export const needsReorder = (i: Item) =>
+  !NO_REORDER_ALERTS.includes(i.cat) && i.store <= i.rl;
+
 /** "WHISKEY" -> "Whiskey", "manage" -> "Manage". */
 export const cap = (c: string) => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();

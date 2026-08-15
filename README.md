@@ -7,6 +7,11 @@ The point is catching leakage between what leaves the storeroom and what each ba
 actually has — so everything is tracked per location (Store / Patio Bar / Back Bar)
 rather than as one total.
 
+Each bottle's headline figure on the Stock tab is its **total across all three
+locations**, with the Store / Patio / Back split shown underneath. Reorder is measured
+against the **storeroom only** — you reorder from the supplier into the store, not into
+a bar.
+
 - **Store** counts whole, unopened bottles.
 - **Patio Bar** and **Back Bar** count partials (`0.25`, `1.87`), matching how the
   bar sheets in the workbook were kept.
@@ -75,9 +80,14 @@ Bars start at zero. Staff enter real bar counts with the **Count** action.
 
 ## Known gaps
 
-- **Reorder levels are guesses.** The workbook left the column blank for all 119
-  items, so this seeds 2 (24 for beer). That currently flags 55 items as needing
-  reorder on day one, which is noise until the real levels are set in Manage.
+- **Reorder levels are still estimates.** The workbook left the column blank for all
+  119 items. Seeded at one case (24) for beer and 1 for everything else, which gives
+  28 day-one alerts (15 of them genuinely at zero) rather than the 55 that a blanket
+  rl=2 produced. Editable per item in Manage — worth confirming with the owner.
+- **Mixers raise no reorder alerts.** Juices, syrups, salt and Tajin are consumables,
+  not leakage risks, and were 11 of the original 55 alerts. They still show OUT on the
+  Stock tab, but never appear in the dashboard alert list or the "Need reorder" count.
+  Change `NO_REORDER_ALERTS` in `src/lib/model.ts` to undo this.
 - **Two bar SKUs were left out**: the bar sheets list a bare `CASAMIGOS` and a bare
   `DON JULIO`, but the storeroom carries two Casamigos and five Don Julio variants.
   Rather than guess a merge, neither was added — add them in Manage if the bars

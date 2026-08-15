@@ -1,4 +1,5 @@
 // One-shot: create the schema, seed the 124 items, create a login.
+// Reorder levels: one case (24) for beer, 1 for everything else — see README.
 // Safe to re-run — the schema is `if not exists`, items upsert, the user is skipped if taken.
 //
 //   node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>" [owner|staff]

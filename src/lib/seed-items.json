@@ -3,343 +3,343 @@
     "name": "WELL WHISKEY",
     "cat": "WHISKEY",
     "store": 16,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "JACK DANIELS",
     "cat": "WHISKEY",
     "store": 8,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "MAKERS MARK",
     "cat": "WHISKEY",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WOODFORD RESERVE",
     "cat": "WHISKEY",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BUFFALO TRACE",
     "cat": "WHISKEY",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CROWN ROYAL",
     "cat": "WHISKEY",
     "store": 12,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CROWN ROYAL APPLE",
     "cat": "WHISKEY",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CROWN ROYAL VANILLA",
     "cat": "WHISKEY",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CROWN ROYAL PEACH",
     "cat": "WHISKEY",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "JAMESON",
     "cat": "WHISKEY",
     "store": 8,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "JAMESON ORANGE",
     "cat": "WHISKEY",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TX WHISKEY",
     "cat": "WHISKEY",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BUCHANAN",
     "cat": "WHISKEY",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BUCHANAN PINEAPPLE",
     "cat": "WHISKEY",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "McAllen 18 Yr",
     "cat": "WHISKEY",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "McAllen 12 Yr",
     "cat": "WHISKEY",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BLUE LABEL",
     "cat": "WHISKEY",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "RED LABEL",
     "cat": "WHISKEY",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BLACK LABEL",
     "cat": "WHISKEY",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DEWARS",
     "cat": "WHISKEY",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DEEP EDDY LEMON",
     "cat": "VODKA",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DEEP EDDY RUBY",
     "cat": "VODKA",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "GREY GOOSE",
     "cat": "VODKA",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "KETTLE ONE",
     "cat": "VODKA",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "Titos",
     "cat": "VODKA",
     "store": 8,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WELL VODKA",
     "cat": "VODKA",
     "store": 15,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WESTERNSON STRAWBERRY",
     "cat": "VODKA",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CASAMIGOS BLANCO",
     "cat": "TEQUILA",
     "store": 9,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CASAMIGOS REPO",
     "cat": "TEQUILA",
     "store": 8,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CLASE AZUL",
     "cat": "TEQUILA",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DON JULIO 1942",
     "cat": "TEQUILA",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DON JULIO 70",
     "cat": "TEQUILA",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DON JULIO ANEJO",
     "cat": "TEQUILA",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DON JULIO BLANCO",
     "cat": "TEQUILA",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "DON JULIO REPO",
     "cat": "TEQUILA",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "ESPOLON",
     "cat": "TEQUILA",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "ESPOLON REPO",
     "cat": "TEQUILA",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "PATRON SLIVER",
     "cat": "TEQUILA",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "PATRON REPO",
     "cat": "TEQUILA",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WELL TEQUILA",
     "cat": "TEQUILA",
     "store": 11,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WELL GIN",
     "cat": "GIN",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BOMBAY SAPPHIRE",
     "cat": "GIN",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TANQERY",
     "cat": "GIN",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "HENDRIX",
     "cat": "GIN",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BACARDI",
     "cat": "RUM",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CAPTAIN MORGAN SPICED",
     "cat": "RUM",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "MALIBU",
     "cat": "RUM",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "RUMCHATA",
     "cat": "RUM",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WELL RUM COCONUT",
     "cat": "RUM",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WELL RUM SILVER",
     "cat": "RUM",
     "store": 12,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "D'USSE",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "FIREBALL",
     "cat": "OTHER",
     "store": 13,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "GRAND MARNIER",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "HENNESSY",
     "cat": "OTHER",
     "store": 9,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "JAEGERMEISTER",
     "cat": "OTHER",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "RUMPLE",
     "cat": "OTHER",
     "store": 10,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "SKREWBALL",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "Bud light",
@@ -441,306 +441,306 @@
     "name": "KAHLUA",
     "cat": "OTHER",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BARTON'S LONG ISLAND",
     "cat": "OTHER",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BAILEYS",
     "cat": "OTHER",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "HYPNOTIQ",
     "cat": "OTHER",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "ESPRESSO",
     "cat": "VODKA",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CHAMBORD",
     "cat": "OTHER",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TUACA",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TRIPLE SEC",
     "cat": "OTHER",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CALYPSO COCONUT",
     "cat": "RUM",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "SOUR APPLE SHNAPPS",
     "cat": "OTHER",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BLUE CARACAO",
     "cat": "OTHER",
     "store": 8,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CRÈME DE BANANA",
     "cat": "OTHER",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "AMARETTO",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WATERMELON SHNAPPS",
     "cat": "OTHER",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "MELON LIQUEUR",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "HENNESSY VSOP",
     "cat": "OTHER",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "STRAWBERRY WESTERN SON",
     "cat": "OTHER",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "PEACH SHNAPPS",
     "cat": "OTHER",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "WYCLIFF",
     "cat": "WINE",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "ANDRE",
     "cat": "WINE",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "MOET",
     "cat": "WINE",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TREZOR",
     "cat": "WINE",
     "store": 24,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "LIME JUICE",
     "cat": "MIXER",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "LEMON JUICE",
     "cat": "MIXER",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "SIMPLE SYRUP",
     "cat": "MIXER",
     "store": 7,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "OLIVE JUICE",
     "cat": "MIXER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "ZING ZANG",
     "cat": "MIXER",
     "store": 14,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "MANGO PUREE",
     "cat": "MIXER",
     "store": 13,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "AGAVE",
     "cat": "MIXER",
     "store": 6,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "STRAWBERRY PUREE",
     "cat": "MIXER",
     "store": 10,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "GRENADINE",
     "cat": "MIXER",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "PICKLE JUICE",
     "cat": "MIXER",
     "store": 4,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "MARGARITA SALT",
     "cat": "MIXER",
     "store": 5,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TAJIN",
     "cat": "MIXER",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TABASCO",
     "cat": "MIXER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "RASPBERRY PUREE",
     "cat": "MIXER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "PASSION FRUIT",
     "cat": "MIXER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "POMEGRANATE",
     "cat": "MIXER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "SWEET N SOUR",
     "cat": "MIXER",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "ORANGE BITTERS",
     "cat": "MIXER",
     "store": 1,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "AROMA BITTERS",
     "cat": "MIXER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "del viejo silver tequilla",
     "cat": "TEQUILA",
     "store": 3,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "Boston butter scotch",
     "cat": "OTHER",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "Absolute vanilla",
     "cat": "VODKA",
     "store": 2,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "Pineapple Juice",
     "cat": "MIXER",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "Cranberry Juice",
     "cat": "MIXER",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "TAAKA",
     "cat": "VODKA",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "KENTUCKY GENTLEMAN",
     "cat": "WHISKEY",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BLUE ICE",
     "cat": "VODKA",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "BARTON NATURALS",
     "cat": "VODKA",
     "store": 0,
-    "rl": 2
+    "rl": 1
   },
   {
     "name": "CALYPSO SILVER",
     "cat": "RUM",
     "store": 0,
-    "rl": 2
+    "rl": 1
   }
 ]

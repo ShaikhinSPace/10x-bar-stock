@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  CATS, LOCS, LOC_LABEL, LOC_SHORT, cap, fmt,
+  CATS, LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, needsReorder, totalOf,
   type Cat, type Item, type Loc, type Move, type SessionUser, type Staff,
 } from "@/lib/model";
 import {
@@ -225,10 +225,10 @@ function Dashboard({
   items, moves, now, onPick,
 }: { items: Item[]; moves: Move[]; now: number; onPick: (id: number) => void }) {
   const since = now - 7 * DAY;
-  const storeTot = sumAt(items, "store");
   const barsTot = sumAt(items, "patio") + sumAt(items, "back");
+  const grandTot = sumAt(items, "store") + barsTot;
   const reorder = items
-    .filter((i) => i.store <= i.rl)
+    .filter(needsReorder)
     .sort((a, b) => a.store - a.rl - (b.store - b.rl));
   const give7 = moves
     .filter((m) => m.type === "give" && +new Date(m.ts) >= since)
@@ -239,7 +239,7 @@ function Dashboard({
       <div className="ptitle">Dashboard <span className="sub">overview &amp; alerts</span></div>
 
       <div className="kpis">
-        <div className="kpi accent"><div className="n">{fmt(storeTot)}</div><div className="l">Bottles in store</div></div>
+        <div className="kpi accent"><div className="n">{fmt(grandTot)}</div><div className="l">Total bottles</div></div>
         <div className="kpi bars"><div className="n">{fmt(barsTot)}</div><div className="l">On the bars</div></div>
         <div className="kpi warn"><div className="n">{reorder.length}</div><div className="l">Need reorder</div></div>
         <div className="kpi mv"><div className="n">{fmt(give7)}</div><div className="l">Given out · 7 days</div></div>
@@ -434,7 +434,7 @@ function Stock({
 
   const shown = useMemo(() => {
     let out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
-    if (lowOnly) out = loc === "store" ? out.filter((i) => i.store <= i.rl) : out.filter((i) => i[loc] > 0);
+    if (lowOnly) out = loc === "store" ? out.filter(needsReorder) : out.filter((i) => i[loc] > 0);
     else if (cat !== "ALL") out = out.filter((i) => i.cat === cat);
     const needle = q.trim().toLowerCase();
     if (needle) out = out.filter((i) => i.name.toLowerCase().includes(needle));
@@ -445,7 +445,7 @@ function Stock({
   const stats = loc === "store"
     ? [
         { n: fmt(sumAt(items, "store")), l: "In store", cls: "accent" },
-        { n: String(items.filter((i) => i.store <= i.rl).length), l: "Low / out", cls: "warn" },
+        { n: String(items.filter(needsReorder).length), l: "Low / out", cls: "warn" },
         {
           n: fmt(moves.filter((m) => m.type === "give" &&
             new Date(m.ts).toDateString() === new Date(now).toDateString())
@@ -512,7 +512,7 @@ function Stock({
         {shown.map((i) => {
           const v = i[loc];
           const zero = v <= 0;
-          const low = loc === "store" && !zero && v <= i.rl;
+          const low = loc === "store" && !zero && needsReorder(i);
           return (
             <button key={i.id} onClick={() => onPick(i.id)}
               className={`row${zero && loc === "store" ? " zero" : ""}${low ? " lowstk" : ""}`}>
@@ -526,7 +526,7 @@ function Stock({
               </div>
               {loc === "store" && zero && <span className="pill out">OUT</span>}
               {loc === "store" && low && <span className="pill low">LOW</span>}
-              <div className="qty">{fmt(v)}<small>{loc === "store" ? "in store" : "at bar"}</small></div>
+              <div className="qty">{fmt(totalOf(i))}<small>total</small></div>
             </button>
           );
         })}
