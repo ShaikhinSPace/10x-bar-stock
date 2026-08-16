@@ -225,11 +225,14 @@ function Dashboard({
   items, moves, now, onPick,
 }: { items: Item[]; moves: Move[]; now: number; onPick: (id: number) => void }) {
   const since = now - 7 * DAY;
-  const barsTot = sumAt(items, "patio") + sumAt(items, "back");
-  const grandTot = sumAt(items, "store") + barsTot;
-  const reorder = items
-    .filter(needsReorder)
-    .sort((a, b) => a.store - a.rl - (b.store - b.rl));
+  const storeTot = sumAt(items, "store");
+  const patioTot = sumAt(items, "patio");
+  const backTot = sumAt(items, "back");
+  const grandTot = storeTot + patioTot + backTot;
+
+  // most deficient first - how far under its own line each bottle is
+  const reorder = items.filter(needsReorder).sort((a, b) => a.store - a.rl - (b.store - b.rl));
+  const outOfStock = reorder.filter((i) => i.store <= 0).length;
   const give7 = moves
     .filter((m) => m.type === "give" && +new Date(m.ts) >= since)
     .reduce((a, m) => a + (m.qty ?? 0), 0);
@@ -238,55 +241,97 @@ function Dashboard({
     <>
       <div className="ptitle">Dashboard <span className="sub">overview &amp; alerts</span></div>
 
-      <div className="kpis">
-        <div className="kpi accent"><div className="n">{fmt(grandTot)}</div><div className="l">Total bottles</div></div>
-        <div className="kpi bars"><div className="n">{fmt(barsTot)}</div><div className="l">On the bars</div></div>
-        <div className="kpi warn"><div className="n">{reorder.length}</div><div className="l">Need reorder</div></div>
-        <div className="kpi mv"><div className="n">{fmt(give7)}</div><div className="l">Given out · 7 days</div></div>
-      </div>
+      <div className="dash">
+        <section className="hero">
+          <div className="lbl">Total bottles</div>
+          <div className="fig">{fmt(grandTot)}</div>
+          <div className="split">
+            <span><i style={{ background: "var(--store)" }} />Store <b>{fmt(storeTot)}</b></span>
+            <span><i style={{ background: "var(--patio-mark)" }} />Patio <b>{fmt(patioTot)}</b></span>
+            <span><i style={{ background: "var(--back-mark)" }} />Back <b>{fmt(backTot)}</b></span>
+          </div>
+        </section>
 
-      <div className="card">
-        <div className="ch">
-          <h3>Reorder alerts</h3>
-          <span className={`badge${reorder.length ? " red" : ""}`}>
-            {reorder.length} item{reorder.length === 1 ? "" : "s"}
-          </span>
+        <div className="tiles">
+          <div className={`tile${outOfStock ? " badstate" : ""}`}>
+            <div className="v">{outOfStock}</div><div className="k">Out of stock</div>
+          </div>
+          <div className={`tile${reorder.length ? " warnstate" : ""}`}>
+            <div className="v">{reorder.length}</div><div className="k">Need reorder</div>
+          </div>
+          <div className="tile">
+            <div className="v">{fmt(give7)}</div><div className="k">Given out · 7 days</div>
+          </div>
         </div>
-        {!reorder.length ? (
-          <div className="empty" style={{ padding: 18 }}>Everything&apos;s above its reorder point. Nice.</div>
-        ) : (
-          <>
-            {reorder.slice(0, 10).map((i) => (
-              <button key={i.id} className={`alert ${i.store <= 0 ? "out" : "low"}`}
-                onClick={() => onPick(i.id)} style={{ width: "100%", textAlign: "left" }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="an">{i.name}</div>
-                  <div className="ac">{cap(i.cat)} · reorder at {fmt(i.rl)}</div>
-                </div>
-                <div className="astat">{fmt(i.store)}<small>in store</small></div>
-                <span className="go">Order ›</span>
-              </button>
-            ))}
-            {reorder.length > 10 && (
-              <div className="ac" style={{ paddingTop: 8, textAlign: "center" }}>
-                +{reorder.length - 10} more
-              </div>
-            )}
-          </>
-        )}
-      </div>
 
-      <div className="dgrid">
+        <ReorderTable rows={reorder} onPick={onPick} />
         <CategoryCard items={items} />
         <TrendCard moves={moves} now={now} />
-      </div>
 
-      <div className="dgrid trio">
-        <BarCard bar="patio" items={items} moves={moves} now={now} />
-        <BarCard bar="back" items={items} moves={moves} now={now} />
-        <TopMoversCard moves={moves} now={now} />
+        <div className="at-side">
+          <BarCard bar="patio" items={items} moves={moves} now={now} />
+          <BarCard bar="back" items={items} moves={moves} now={now} />
+          <TopMoversCard moves={moves} now={now} />
+        </div>
       </div>
     </>
+  );
+}
+
+/**
+ * Reorder is a table, not a list of cards: every row carries five facts and the
+ * whole list has to be readable, so nothing is truncated - it scrolls instead.
+ * "On bars" is here because a zero storeroom reads very differently when there
+ * are still three bottles out on the Patio.
+ */
+function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => void }) {
+  return (
+    <div className="card at-reorder">
+      <div className="ch">
+        <h3>Reorder</h3>
+        <span className={`badge${rows.length ? " red" : ""}`}>{rows.length}</span>
+      </div>
+      {!rows.length ? (
+        <div className="empty" style={{ padding: 18 }}>
+          Everything&apos;s above its reorder point.
+        </div>
+      ) : (
+        <div className="rscroll">
+          <table className="rtable">
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Bottle</th>
+                <th className="num">In store</th>
+                <th className="num hide-sm">On bars</th>
+                <th className="num">Reorder at</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((i) => {
+                const isOut = i.store <= 0;
+                return (
+                  <tr key={i.id} onClick={() => onPick(i.id)}>
+                    <td>
+                      <span className={`rstat ${isOut ? "out" : "low"}`}>
+                        <i />{isOut ? "Out" : "Low"}
+                      </span>
+                    </td>
+                    <td>
+                      <div className="nm">{i.name}</div>
+                      <div className="cat">{cap(i.cat)}</div>
+                    </td>
+                    <td className="num short">{fmt(i.store)}</td>
+                    <td className="num hide-sm">{fmt(i.patio + i.back)}</td>
+                    <td className="num">{fmt(i.rl)}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -298,7 +343,7 @@ function CategoryCard({ items }: { items: Item[] }) {
   const max = Math.max(1, ...data.map((d) => d.v));
 
   return (
-    <div className="card">
+    <div className="card at-cat">
       <div className="ch"><h3>Store by category</h3></div>
       {data.map((d) => (
         <div className="hbar" key={d.c}>
@@ -327,7 +372,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
   const max = Math.max(1, ...per.map((x) => x.p + x.b));
 
   return (
-    <div className="card">
+    <div className="card at-trend">
       <div className="ch"><h3>Given out · last 7 days</h3></div>
       <div className="cols">
         {per.map((x, idx) => {
