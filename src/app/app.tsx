@@ -79,6 +79,13 @@ const LOC_ICON: Record<Loc, React.ReactNode> = {
   ),
 };
 
+/** Muted category dots — grouping cues inside a delivery, not a data encoding. */
+const CAT_COLOR: Record<Cat, string> = {
+  WHISKEY: "#C08A4A", VODKA: "#6FA8DC", TEQUILA: "#8FBF6A", GIN: "#5FB8A8",
+  RUM: "#C2705A", BEER: "#D6A63C", WINE: "#B0607F", MIXER: "#7E8CA8",
+  OTHER: "#8E86F2",
+};
+
 const LOC_COLOR: Record<Loc, string> = {
   store: "var(--store)", patio: "var(--patio)", back: "var(--back)",
 };
@@ -892,14 +899,19 @@ function Delivery({
                   {fmt(d.bottles)}<small>bottles</small>
                 </span>
               </summary>
-              <div className="inlines">
-                {d.lines.map((l) => (
-                  <div className="inline-row" key={l.item}>
-                    <span className="il-n">{l.item}</span>
-                    <span className="il-c">{cap(l.cat)}</span>
-                    <span className="il-q">+{fmt(l.qty)}</span>
-                  </div>
-                ))}
+              <div className="inbody">
+                <div className="inlines">
+                  {d.lines.map((l) => (
+                    <div className="itile" key={l.item}>
+                      <span className="itdot" style={{ background: CAT_COLOR[l.cat] }} />
+                      <span className="itname">
+                        <span className="n">{l.item}</span>
+                        <span className="c">{cap(l.cat)}</span>
+                      </span>
+                      <span className="itq">+{fmt(l.qty)}</span>
+                    </div>
+                  ))}
+                </div>
                 <div className="inby">
                   {d.lines.length} item{d.lines.length === 1 ? "" : "s"} · booked by {d.user_name}
                 </div>

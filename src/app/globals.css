@@ -432,10 +432,21 @@
   color:var(--green)}
 .inv .incount small{font-size:10px;color:var(--txt-3);font-weight:500;text-transform:uppercase;
   letter-spacing:.04em;margin-left:4px}
-.inlines{padding:2px 0 12px 16px}
-.inline-row{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px}
-.inline-row .il-n{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.inline-row .il-c{font-size:11px;color:var(--txt-3);flex:none}
-.inline-row .il-q{font-variant-numeric:tabular-nums;font-weight:600;color:var(--green);
-  flex:none;min-width:38px;text-align:right}
-.inby{font-size:11px;color:var(--txt-3);margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+/* each line of a delivery is its own tile, so a long drop stays scannable */
+.inbody{padding:2px 0 14px}
+.inlines{display:grid;grid-template-columns:1fr;gap:8px}
+.itile{display:flex;align-items:center;gap:11px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:11px 13px;transition:.12s}
+.itile:hover{border-color:var(--txt-3)}
+.itdot{width:8px;height:8px;border-radius:50%;flex:none}
+.itname{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.itname .n{font-size:13.5px;font-weight:600;line-height:1.2;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.itname .c{font-size:10px;color:var(--txt-3);text-transform:uppercase;letter-spacing:.06em}
+.itq{flex:none;font-size:14px;font-weight:700;color:var(--green);
+  font-variant-numeric:tabular-nums;background:rgba(63,197,138,.12);
+  border-radius:999px;padding:4px 10px}
+@media(min-width:620px){ .inlines{grid-template-columns:1fr 1fr} }
+@media(min-width:1240px){ .inlines{grid-template-columns:1fr 1fr 1fr} }
+.inby{font-size:11px;color:var(--txt-3);margin-top:12px;padding-top:10px;
+  border-top:1px solid var(--line)}
