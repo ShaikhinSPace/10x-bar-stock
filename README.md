@@ -54,12 +54,24 @@ CHECK constraints (store stays whole, nothing goes negative).
 4. Deploy. The schema and seed only need running once, against the same Neon
    database, from your machine.
 
+## Deliveries
+
+A delivery arrives as one drop with many lines, so the **Delivery** tab is a draft
+basket: search, add lines, adjust quantities, then book the lot in one action.
+Beer adds by the case (24), everything else a bottle at a time.
+
+Every line of one delivery shares a `batch` id and carries the optional invoice and
+supplier the workbook's `Stock In` sheet used to record. The whole delivery lands in
+a single SQL statement, so it is all-or-nothing — stock and its log entries appear
+together or not at all. Duplicate lines for the same bottle are merged before
+booking.
+
 ## Roles
 
 | | Give out / Receive / Count | Undo own entry | Manage bottles & staff |
 |---|---|---|---|
-| **staff** | yes | yes | no |
-| **owner** | yes | any entry | yes |
+| **staff** | yes (incl. deliveries) | yes | no |
+| **owner** | yes (incl. deliveries) | any entry | yes |
 
 Only the newest entry for a bottle can be undone — reversing an older one would
 clobber whatever was logged after it. Correct an older mistake with a **Count**.

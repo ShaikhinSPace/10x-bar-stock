@@ -39,8 +39,8 @@ const sql = neon(process.env.DATABASE_URL);
 const schema = readFileSync(new URL("../src/lib/schema.sql", import.meta.url), "utf8")
   .replace(/--[^\n]*/g, "");
 const statements = schema.split(";").map((s) => s.trim()).filter(Boolean);
-if (statements.length !== 5) {
-  throw new Error(`expected 5 schema statements, parsed ${statements.length}`);
+if (statements.length !== 9) {
+  throw new Error(`expected 9 schema statements, parsed ${statements.length}`);
 }
 for (const stmt of statements) {
   await sql.query(stmt);

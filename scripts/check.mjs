@@ -8,7 +8,10 @@ import { neon } from "@neondatabase/serverless";
 import assert from "node:assert/strict";
 
 const sql = neon(process.env.DATABASE_URL);
-const NAME = `__check_${Date.now()}`;
+const NAME  = `__check_${Date.now()}`;
+const NAME2 = `${NAME}_a`;
+const NAME3 = `${NAME}_b`;
+const BATCH = `${NAME}_batch`;
 let userId;
 
 const val = async (id, loc) => {
@@ -86,6 +89,38 @@ try {
     /violates check constraint/, "category must be one of the nine"
   );
 
+  // --- a delivery books every line in one atomic statement ---
+  const [{ id: d1 }] = await sql`
+    insert into items (name, cat, store) values (${NAME2}, 'GIN', 1) returning id`;
+  const [{ id: d2 }] = await sql`
+    insert into items (name, cat, store) values (${NAME3}, 'BEER', 10) returning id`;
+
+  const ids = [d1, d2, d1];            // d1 twice — the action merges duplicates
+  const qtys = [3, 24, 2];
+  const merged = new Map();
+  ids.forEach((id, n) => merged.set(id, (merged.get(id) ?? 0) + qtys[n]));
+
+  const booked = await sql`
+    with lines as (
+      select * from unnest(${[...merged.keys()]}::int[], ${[...merged.values()]}::numeric[])
+        as t(item_id, qty)
+    ), upd as (
+      update items i set store = i.store + l.qty
+      from lines l where i.id = l.item_id and not i.archived
+      returning i.id, i.name, i.cat, l.qty
+    )
+    insert into moves
+      (type, item_id, item_name, cat, qty, loc, user_id, user_name, batch, invoice, supplier)
+    select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
+           ${userId}, 'Check Runner', ${BATCH}, 'INV-1', 'Acme'
+    from upd returning id`;
+
+  assert.equal(booked.length, 2, "a duplicated line must merge, not double-insert");
+  assert.equal(await val(d1, "store"), 6, "1 + 3 + 2 = 6 after merging duplicate lines");
+  assert.equal(await val(d2, "store"), 34, "10 + 24 = 34");
+  const tagged = await sql`select count(*) c from moves where batch = ${BATCH}`;
+  assert.equal(Number(tagged[0].c), 2, "every line of a delivery shares one batch id");
+
   // --- hashes written by the scripts must verify the way src/lib/auth.ts verifies ---
   // Mirrors verifyPassword() exactly; if the two drift apart, logins break silently.
   const { hashPassword } = await import("./hash.mjs");
@@ -103,7 +138,8 @@ try {
 
   console.log("all checks passed");
 } finally {
-  await sql`delete from moves where item_name = ${NAME}`;
-  await sql`delete from items where name like ${NAME + "%"}`;
+  const names = [NAME, NAME2, NAME3];
+  await sql`delete from moves where item_name = any(${names}::text[])`;
+  await sql`delete from items where name = any(${names}::text[])`;
   if (userId) await sql`delete from users where id = ${userId}`;
 }

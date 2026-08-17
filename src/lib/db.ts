@@ -34,12 +34,14 @@ export async function getItems(): Promise<Item[]> {
 
 export async function getMoves(limit = 500): Promise<Move[]> {
   const rows = await sql`
-    select id, ts, type, item_id, item_name, cat, qty, loc, from_val, to_val, user_name
+    select id, ts, type, item_id, item_name, cat, qty, loc, from_val, to_val,
+           user_name, batch, invoice, supplier
     from moves order by ts desc, id desc limit ${limit}`;
   return rows.map((r) => ({
     id: Number(r.id), ts: new Date(r.ts).toISOString(), type: r.type,
     item_id: r.item_id, item_name: r.item_name, cat: r.cat,
     qty: num(r.qty), loc: r.loc, from_val: num(r.from_val), to_val: num(r.to_val),
     user_name: r.user_name,
+    batch: r.batch, invoice: r.invoice, supplier: r.supplier,
   }));
 }

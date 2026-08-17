@@ -3,14 +3,14 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   CATS, LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, needsReorder, totalOf,
-  type Cat, type Item, type Loc, type Move, type SessionUser, type Staff,
+  type Cat, type DeliveryLine, type Item, type Loc, type Move, type SessionUser, type Staff,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, giveOut, logout, receive, setCount,
+  addItem, addUser, archiveItem, giveOut, logout, receive, receiveDelivery, setCount,
   setReorderLevel, setUserActive, undoMove, type Result,
 } from "./actions";
 
-type Tab = "dashboard" | "stock" | "activity" | "manage";
+type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
 type SheetAct = "give" | "receive" | "count";
 
 const DAY = 864e5;
@@ -29,6 +29,12 @@ const NAV_ICON: Record<Tab, React.ReactNode> = {
   stock: (
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
       <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
+    </svg>
+  ),
+  delivery: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+      <path d="M3 8.5 12 4l9 4.5v7L12 20l-9-4.5z" strokeLinejoin="round" />
+      <path d="M3 8.5 12 13l9-4.5M12 13v7" strokeLinejoin="round" />
     </svg>
   ),
   activity: (
@@ -138,8 +144,8 @@ export function App({
   }
 
   const tabs: Tab[] = user.role === "owner"
-    ? ["dashboard", "stock", "activity", "manage"]
-    : ["dashboard", "stock", "activity"];
+    ? ["dashboard", "stock", "delivery", "activity", "manage"]
+    : ["dashboard", "stock", "delivery", "activity"];
 
   const nav = (
     <>
@@ -183,6 +189,7 @@ export function App({
 
             {tab === "dashboard" && <Dashboard items={items} moves={moves} now={now} onPick={setSheetId} />}
             {tab === "stock" && <Stock items={items} moves={moves} now={now} onPick={setSheetId} />}
+            {tab === "delivery" && <Delivery items={items} run={run} pending={pending} />}
             {tab === "activity" && (
               <Activity moves={moves} user={user} now={now} onToast={setToast}
                 onUndo={(id) => run(() => undoMove(id), "Entry undone", false)} />
@@ -719,6 +726,149 @@ function QtyPicker({
   );
 }
 
+/* ============================ delivery ============================ */
+
+/**
+ * Deliveries arrive as one drop with many lines. Booking them one bottle at a
+ * time through the Stock sheet is slow enough that people skip it, so this is a
+ * draft basket: search, add lines, then book the whole thing in one action.
+ */
+function Delivery({
+  items, run, pending,
+}: {
+  items: Item[]; pending: boolean;
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+}) {
+  const [lines, setLines] = useState<Map<number, number>>(new Map());
+  const [q, setQ] = useState("");
+  const [invoice, setInvoice] = useState("");
+  const [supplier, setSupplier] = useState("");
+
+  const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  const needle = q.trim().toLowerCase();
+  const matches = useMemo(
+    () => (needle
+      ? items.filter((i) => i.name.toLowerCase().includes(needle)).slice(0, 8)
+      : []),
+    [items, needle]
+  );
+
+  const drafted = [...lines.entries()];
+  const totalBottles = drafted.reduce((a, [, n]) => a + n, 0);
+
+  const setQty = (id: number, n: number) =>
+    setLines((prev) => {
+      const next = new Map(prev);
+      if (n <= 0) next.delete(id); else next.set(id, n);
+      return next;
+    });
+
+  const add = (i: Item) => {
+    // Beer moves by the case; everything else a bottle at a time.
+    const step = i.cat === "BEER" ? 24 : 1;
+    setQty(i.id, (lines.get(i.id) ?? 0) + step);
+    setQ("");
+  };
+
+  function book() {
+    const payload: DeliveryLine[] = drafted.map(([itemId, qty]) => ({ itemId, qty }));
+    run(
+      () => receiveDelivery(payload, invoice, supplier),
+      `Delivery booked — ${totalBottles} bottles across ${drafted.length} item${drafted.length === 1 ? "" : "s"}`,
+      false
+    );
+    setLines(new Map());
+    setInvoice("");
+    setSupplier("");
+  }
+
+  return (
+    <>
+      <div className="ptitle">Delivery <span className="sub">book a whole drop at once</span></div>
+
+      <div className="card">
+        <div className="frow">
+          <div className="fld">
+            <label>Invoice # <span className="opt">optional</span></label>
+            <input value={invoice} onChange={(e) => setInvoice(e.target.value)} autoComplete="off" />
+          </div>
+          <div className="fld">
+            <label>Supplier <span className="opt">optional</span></label>
+            <input value={supplier} onChange={(e) => setSupplier(e.target.value)} autoComplete="off" />
+          </div>
+        </div>
+
+        <div className="search" style={{ margin: "14px 0 0" }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
+          </svg>
+          <input placeholder="Search a bottle to add…" value={q} autoComplete="off"
+            onChange={(e) => setQ(e.target.value)} />
+          {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+        </div>
+
+        {needle && (
+          <div className="dresults">
+            {!matches.length && <div className="dnone">No bottle matches “{q}”.</div>}
+            {matches.map((i) => (
+              <button key={i.id} className="dhit" onClick={() => add(i)}>
+                <span className="dhn">{i.name}</span>
+                <span className="dhc">{cap(i.cat)} · {fmt(i.store)} in store</span>
+                <span className="dhadd">{i.cat === "BEER" ? "+24" : "+1"}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="ch">
+          <h3>This delivery</h3>
+          <span className={`badge${drafted.length ? " red" : ""}`}>{drafted.length}</span>
+        </div>
+
+        {!drafted.length ? (
+          <div className="empty" style={{ padding: 22 }}>
+            Nothing added yet.<br />Search above to start building the delivery.
+          </div>
+        ) : (
+          <>
+            {drafted.map(([id, n]) => {
+              const it = byId.get(id);
+              if (!it) return null;
+              const step = it.cat === "BEER" ? 24 : 1;
+              return (
+                <div className="dline" key={id}>
+                  <div className="dl-nm">
+                    <div className="t">{it.name}</div>
+                    <div className="s">{fmt(it.store)} in store → <b>{fmt(it.store + n)}</b></div>
+                  </div>
+                  <div className="dl-qty">
+                    <button onClick={() => setQty(id, n - step)} aria-label={`Less ${it.name}`}>−</button>
+                    <input type="number" inputMode="numeric" min="0" value={n}
+                      onChange={(e) => setQty(id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
+                    <button onClick={() => setQty(id, n + step)} aria-label={`More ${it.name}`}>+</button>
+                  </div>
+                  <button className="dl-x" onClick={() => setQty(id, 0)} aria-label={`Remove ${it.name}`}>×</button>
+                </div>
+              );
+            })}
+
+            <div className="dfoot">
+              <div className="dsum">
+                <b>{fmt(totalBottles)}</b> bottles · {drafted.length} item{drafted.length === 1 ? "" : "s"}
+              </div>
+              <button className="commit green" disabled={pending} onClick={book}>
+                Book delivery
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
 /* ============================ activity ============================ */
 
 function Activity({
@@ -730,14 +880,16 @@ function Activity({
 }) {
   function copyCSV() {
     const rows: (string | number)[][] = [
-      ["Date", "Time", "Type", "Item", "Category", "Qty/Value", "Location", "Entered By"],
+      ["Date", "Time", "Type", "Item", "Category", "Qty/Value", "Location", "Entered By",
+       "Invoice", "Supplier"],
     ];
     for (const m of [...moves].reverse()) {
       const d = new Date(m.ts);
       const base = [d.toLocaleDateString(), timeStr(+d)];
-      if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name]);
-      else if (m.type === "receive") rows.push([...base, "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name]);
-      else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name]);
+      const extra = [m.invoice ?? "", m.supplier ?? ""];
+      if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
+      else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name, ...extra]);
+      else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
     }
     const csv = rows
       .map((r) => r.map((c) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(","))
@@ -783,10 +935,14 @@ function Activity({
                   <div className="s">
                     {m.type === "count" ? `Was ${fmt(m.from_val ?? 0)} · ` : ""}
                     {cap(m.cat)} · {m.user_name}
+                    {m.invoice ? ` · inv ${m.invoice}` : ""}
+                    {m.supplier ? ` · ${m.supplier}` : ""}
                   </div>
                 </div>
-                <span className={`tag ${m.loc ?? "store"}`}>
-                  {m.type === "receive" ? "Received" : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`}
+                <span className={`tag ${m.type === "receive" && m.batch ? "batch" : m.loc ?? "store"}`}>
+                  {m.type === "receive"
+                    ? (m.batch ? "Delivery" : "Received")
+                    : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`}
                 </span>
                 <div className="time">
                   {timeStr(ts)}

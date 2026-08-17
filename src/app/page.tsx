@@ -3,7 +3,7 @@ import { getSession } from "@/lib/auth";
 import { getItems, getMoves, requestNow, sql } from "@/lib/db";
 import { App } from "./app";
 
-const TABS = ["dashboard", "stock", "activity", "manage"] as const;
+const TABS = ["dashboard", "stock", "delivery", "activity", "manage"] as const;
 
 export default async function Page({ searchParams }: PageProps<"/">) {
   const user = await getSession();

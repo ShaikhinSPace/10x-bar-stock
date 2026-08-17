@@ -361,3 +361,52 @@
   .tile .k{font-size:10.5px}
   .rtable .hide-sm{display:none}
 }
+
+/* ==================== delivery ==================== */
+.fld label .opt{font-weight:500;color:var(--txt-3);text-transform:none;letter-spacing:0;margin-left:5px}
+
+.dresults{margin-top:10px;border-top:1px solid var(--line)}
+.dhit{display:flex;align-items:center;gap:10px;width:100%;text-align:left;padding:10px 2px;
+  border-bottom:1px solid var(--line)}
+.dhit:hover{background:var(--surface-2)}
+.dhit .dhn{font-size:14.5px;font-weight:500;flex:1;min-width:0;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis}
+.dhit .dhc{font-size:11.5px;color:var(--txt-3);flex:none}
+.dhit .dhadd{font-size:12px;font-weight:700;color:var(--green);flex:none;min-width:30px;text-align:right}
+.dnone{font-size:13.5px;color:var(--txt-3);padding:12px 2px}
+
+.dline{display:flex;align-items:center;gap:10px;padding:10px 0;border-top:1px solid var(--line)}
+.dline:first-of-type{border-top:none}
+.dl-nm{flex:1;min-width:0}
+.dl-nm .t{font-size:14.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dl-nm .s{font-size:11.5px;color:var(--txt-3);margin-top:2px}
+.dl-nm .s b{color:var(--green);font-weight:600;font-variant-numeric:tabular-nums}
+.dl-qty{display:flex;align-items:center;gap:2px;flex:none;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:10px;padding:2px}
+.dl-qty button{width:34px;height:34px;font-size:19px;font-weight:600;color:var(--txt);
+  border-radius:8px;display:flex;align-items:center;justify-content:center}
+.dl-qty button:hover{background:var(--line)}
+.dl-qty input{width:46px;height:34px;text-align:center;background:none;border:none;color:var(--txt);
+  font-size:15px;font-weight:600;font-variant-numeric:tabular-nums;outline:none;
+  -moz-appearance:textfield}
+.dl-qty input::-webkit-outer-spin-button,.dl-qty input::-webkit-inner-spin-button{
+  -webkit-appearance:none;margin:0}
+.dl-x{flex:none;width:28px;height:28px;border-radius:8px;color:var(--txt-3);font-size:19px;
+  display:flex;align-items:center;justify-content:center}
+.dl-x:hover{background:var(--surface-2);color:var(--red)}
+
+.dfoot{display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:14px;
+  border-top:1px solid var(--line);flex-wrap:wrap}
+.dsum{font-size:13.5px;color:var(--txt-2);flex:1;min-width:120px}
+.dsum b{font-size:19px;font-weight:600;color:var(--txt);font-variant-numeric:tabular-nums;
+  margin-right:3px}
+.dfoot .commit{width:auto;flex:none;padding:13px 24px;font-size:15px}
+
+/* the batch tag on a delivery line in the activity log */
+.tag.batch{background:rgba(63,197,138,.14);color:var(--green)}
+
+@media(max-width:899px){ .dfoot .commit{width:100%} }
+@media(min-width:900px){
+  .dline{padding:9px 0}
+  .dresults{max-height:none}
+}

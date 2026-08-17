@@ -27,7 +27,12 @@ export type Move = {
   qty: number | null; loc: Loc | null;
   from_val: number | null; to_val: number | null;
   user_name: string;
+  /** Set on every line of a delivery, so one drop groups in the activity log. */
+  batch: string | null; invoice: string | null; supplier: string | null;
 };
+
+/** One line of a delivery being drafted on the Delivery tab. */
+export type DeliveryLine = { itemId: number; qty: number };
 
 export type SessionUser = {
   id: number; name: string; username: string; role: "owner" | "staff";

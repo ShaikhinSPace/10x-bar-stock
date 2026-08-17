@@ -40,5 +40,12 @@ create table if not exists moves (
   user_name text not null
 );
 
+-- A delivery arrives as one drop with many lines, so its receive moves share a
+-- batch id, plus the invoice and supplier the old Stock In sheet recorded.
+alter table moves add column if not exists batch    text;
+alter table moves add column if not exists invoice  text;
+alter table moves add column if not exists supplier text;
+
 create index if not exists moves_ts_idx on moves (ts desc);
 create index if not exists moves_item_ts_idx on moves (item_id, ts desc);
+create index if not exists moves_batch_idx on moves (batch) where batch is not null;
