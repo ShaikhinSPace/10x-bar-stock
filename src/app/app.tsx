@@ -1124,6 +1124,37 @@ function Manage({
         ))}
       </div>
 
+      <div className="card">
+        <div className="ch"><h3>Export to Excel</h3></div>
+        <div className="xgrid">
+          {([
+            ["stock", "Stock list", "Every bottle, per location, with totals and status"],
+            ["reorder", "Reorder list", "Only what is at or below its reorder point"],
+            ["deliveries", "Deliveries", "One row per delivery line, with invoice and supplier"],
+            ["activity", "Full activity", "Every give-out, delivery and count ever logged"],
+            ["all", "Everything", "All four as separate sheets in one workbook"],
+          ] as const).map(([kind, title, blurb]) => (
+            <a className={`xcard${kind === "all" ? " xall" : ""}`} key={kind}
+               href={`/api/export?kind=${kind}`} download>
+              <span className="xi">
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" strokeWidth="2">
+                  <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                  <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
+                </svg>
+              </span>
+              <span className="xt">
+                <span className="n">{title}</span>
+                <span className="b">{blurb}</span>
+              </span>
+            </a>
+          ))}
+        </div>
+        <div className="hint">
+          Downloads a real .xlsx — open it straight in Excel or Numbers.
+        </div>
+      </div>
+
       <div className="card addcard">
         <div className="ch"><h3>Staff</h3><span className="badge">{staff.length}</span></div>
         <div className="frm">

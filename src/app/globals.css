@@ -450,3 +450,17 @@
 @media(min-width:1240px){ .inlines{grid-template-columns:1fr 1fr 1fr} }
 .inby{font-size:11px;color:var(--txt-3);margin-top:12px;padding-top:10px;
   border-top:1px solid var(--line)}
+
+/* ==================== export to excel ==================== */
+.xgrid{display:grid;grid-template-columns:1fr;gap:9px}
+.xcard{display:flex;align-items:center;gap:12px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:12px 13px;
+  text-decoration:none;color:inherit;transition:.12s}
+.xcard:hover{border-color:var(--green);background:rgba(63,197,138,.07)}
+.xcard .xi{flex:none;width:34px;height:34px;border-radius:9px;display:flex;
+  align-items:center;justify-content:center;background:rgba(63,197,138,.13);color:var(--green)}
+.xcard .xt{display:flex;flex-direction:column;gap:2px;min-width:0}
+.xcard .xt .n{font-size:14px;font-weight:600}
+.xcard .xt .b{font-size:11.5px;color:var(--txt-3);line-height:1.35}
+.xcard.xall{border-style:dashed}
+@media(min-width:700px){ .xgrid{grid-template-columns:1fr 1fr} .xcard.xall{grid-column:1/-1} }
