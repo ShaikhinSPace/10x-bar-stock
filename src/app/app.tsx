@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
   CATS, LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, needsReorder, totalOf,
-  type Cat, type DeliveryLine, type Item, type Loc, type Move, type SessionUser, type Staff,
+  type Cat, type Delivery as Booked, type DeliveryLine, type Item, type Loc, type Move,
+  type SessionUser, type Staff,
 } from "@/lib/model";
 import {
   addItem, addUser, archiveItem, giveOut, logout, receive, receiveDelivery, setCount,
@@ -112,10 +113,10 @@ const timeStr = (ts: number) =>
 /* ============================ shell ============================ */
 
 export function App({
-  user, items, moves, staff, now, initialTab = "dashboard",
+  user, items, moves, staff, deliveries, now, initialTab = "dashboard",
 }: {
   user: SessionUser; items: Item[]; moves: Move[]; staff: Staff[];
-  now: number; initialTab?: Tab;
+  deliveries: Booked[]; now: number; initialTab?: Tab;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
   const [sheetId, setSheetId] = useState<number | null>(null);
@@ -189,7 +190,7 @@ export function App({
 
             {tab === "dashboard" && <Dashboard items={items} moves={moves} now={now} onPick={setSheetId} />}
             {tab === "stock" && <Stock items={items} moves={moves} now={now} onPick={setSheetId} />}
-            {tab === "delivery" && <Delivery items={items} run={run} pending={pending} />}
+            {tab === "delivery" && <Delivery items={items} deliveries={deliveries} run={run} pending={pending} />}
             {tab === "activity" && (
               <Activity moves={moves} user={user} now={now} onToast={setToast}
                 onUndo={(id) => run(() => undoMove(id), "Entry undone", false)} />
@@ -734,9 +735,9 @@ function QtyPicker({
  * draft basket: search, add lines, then book the whole thing in one action.
  */
 function Delivery({
-  items, run, pending,
+  items, deliveries, run, pending,
 }: {
-  items: Item[]; pending: boolean;
+  items: Item[]; deliveries: Booked[]; pending: boolean;
   run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
 }) {
   const [lines, setLines] = useState<Map<number, number>>(new Map());
@@ -789,8 +790,9 @@ function Delivery({
       <div className="card">
         <div className="frow">
           <div className="fld">
-            <label>Invoice # <span className="opt">optional</span></label>
-            <input value={invoice} onChange={(e) => setInvoice(e.target.value)} autoComplete="off" />
+            <label>Invoice # <span className="req">required</span></label>
+            <input value={invoice} onChange={(e) => setInvoice(e.target.value)}
+              autoComplete="off" placeholder="e.g. 88214" />
           </div>
           <div className="fld">
             <label>Supplier <span className="opt">optional</span></label>
@@ -857,12 +859,53 @@ function Delivery({
             <div className="dfoot">
               <div className="dsum">
                 <b>{fmt(totalBottles)}</b> bottles · {drafted.length} item{drafted.length === 1 ? "" : "s"}
+                {!invoice.trim() && <div className="dwarn">Add the invoice number to book this</div>}
               </div>
-              <button className="commit green" disabled={pending} onClick={book}>
+              <button className="commit green" disabled={pending || !invoice.trim()} onClick={book}>
                 Book delivery
               </button>
             </div>
           </>
+        )}
+      </div>
+
+      <div className="card">
+        <div className="ch">
+          <h3>Past deliveries</h3>
+          <span className="badge">{deliveries.length}</span>
+        </div>
+        {!deliveries.length ? (
+          <div className="empty" style={{ padding: 22 }}>
+            No deliveries booked yet.
+          </div>
+        ) : (
+          deliveries.map((d) => (
+            <details className="inv" key={d.batch}>
+              <summary>
+                <span className="ino">{d.invoice}</span>
+                <span className="inmeta">
+                  {new Date(d.ts).toLocaleDateString(undefined,
+                    { day: "numeric", month: "short", year: "numeric" })}
+                  {d.supplier ? ` · ${d.supplier}` : ""}
+                </span>
+                <span className="incount">
+                  {fmt(d.bottles)}<small>bottles</small>
+                </span>
+              </summary>
+              <div className="inlines">
+                {d.lines.map((l) => (
+                  <div className="inline-row" key={l.item}>
+                    <span className="il-n">{l.item}</span>
+                    <span className="il-c">{cap(l.cat)}</span>
+                    <span className="il-q">+{fmt(l.qty)}</span>
+                  </div>
+                ))}
+                <div className="inby">
+                  {d.lines.length} item{d.lines.length === 1 ? "" : "s"} · booked by {d.user_name}
+                </div>
+              </div>
+            </details>
+          ))
         )}
       </div>
     </>

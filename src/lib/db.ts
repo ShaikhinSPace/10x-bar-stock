@@ -1,6 +1,6 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
-import type { Item, Move } from "./model";
+import type { Delivery, Item, Move } from "./model";
 
 // Thrown at module load, so a missing value fails the build rather than every request.
 if (!process.env.DATABASE_URL) {
@@ -43,5 +43,30 @@ export async function getMoves(limit = 500): Promise<Move[]> {
     qty: num(r.qty), loc: r.loc, from_val: num(r.from_val), to_val: num(r.to_val),
     user_name: r.user_name,
     batch: r.batch, invoice: r.invoice, supplier: r.supplier,
+  }));
+}
+
+/**
+ * Booked deliveries, rebuilt by grouping moves on their batch id — a delivery has
+ * no table of its own, it *is* the set of receive moves that arrived together.
+ */
+export async function getDeliveries(limit = 100): Promise<Delivery[]> {
+  const rows = await sql`
+    select batch, invoice, supplier,
+           min(ts) as ts, min(user_name) as user_name,
+           sum(qty) as bottles,
+           json_agg(json_build_object('item', item_name, 'cat', cat, 'qty', qty)
+                    order by item_name) as lines
+    from moves
+    where batch is not null
+    group by batch, invoice, supplier
+    order by min(ts) desc
+    limit ${limit}`;
+  return rows.map((r) => ({
+    batch: r.batch, invoice: r.invoice ?? "—", supplier: r.supplier,
+    ts: new Date(r.ts).toISOString(), user_name: r.user_name,
+    bottles: Number(r.bottles),
+    lines: (r.lines as { item: string; cat: Item["cat"]; qty: string }[])
+      .map((l) => ({ item: l.item, cat: l.cat, qty: Number(l.qty) })),
   }));
 }

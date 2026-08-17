@@ -121,6 +121,36 @@ try {
   const tagged = await sql`select count(*) c from moves where batch = ${BATCH}`;
   assert.equal(Number(tagged[0].c), 2, "every line of a delivery shares one batch id");
 
+  // --- the same invoice cannot be booked twice (that would inflate stock silently) ---
+  const before = await val(d2, "store");
+  const second = await sql`
+    with guard as (
+      select 1 where not exists (select 1 from moves where invoice = ${"INV-1"})
+    ), lines as (
+      select * from unnest(${[d2]}::int[], ${[99]}::numeric[]) as t(item_id, qty)
+    ), upd as (
+      update items i set store = i.store + l.qty
+      from lines l, guard
+      where i.id = l.item_id and not i.archived
+      returning i.id, i.name, i.cat, l.qty
+    )
+    insert into moves
+      (type, item_id, item_name, cat, qty, loc, user_id, user_name, batch, invoice)
+    select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
+           ${userId}, 'Check Runner', ${BATCH + "_dupe"}, ${"INV-1"}
+    from upd returning id`;
+  assert.equal(second.length, 0, "re-booking a used invoice must insert nothing");
+  assert.equal(await val(d2, "store"), before, "a rejected re-book must not change stock");
+
+  // --- a delivery rebuilds from its batch, lines and all ---
+  const [grouped] = await sql`
+    select invoice, supplier, sum(qty) as bottles, count(*) as n,
+           json_agg(json_build_object('item', item_name, 'qty', qty) order by item_name) as lines
+    from moves where batch = ${BATCH} group by invoice, supplier`;
+  assert.equal(grouped.invoice, "INV-1", "the delivery keeps its invoice number");
+  assert.equal(Number(grouped.bottles), 29, "3 + 2 merged, plus 24 = 29 bottles");
+  assert.equal(grouped.lines.length, 2, "both lines come back with the delivery");
+
   // --- hashes written by the scripts must verify the way src/lib/auth.ts verifies ---
   // Mirrors verifyPassword() exactly; if the two drift apart, logins break silently.
   const { hashPassword } = await import("./hash.mjs");
@@ -140,6 +170,7 @@ try {
 } finally {
   const names = [NAME, NAME2, NAME3];
   await sql`delete from moves where item_name = any(${names}::text[])`;
+  await sql`delete from moves where batch = any(${[BATCH, BATCH + "_dupe"]}::text[])`;
   await sql`delete from items where name = any(${names}::text[])`;
   if (userId) await sql`delete from users where id = ${userId}`;
 }

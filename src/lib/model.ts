@@ -31,6 +31,13 @@ export type Move = {
   batch: string | null; invoice: string | null; supplier: string | null;
 };
 
+/** A booked delivery, rebuilt from the moves that share one batch id. */
+export type Delivery = {
+  batch: string; invoice: string; supplier: string | null;
+  ts: string; user_name: string; bottles: number;
+  lines: { item: string; cat: Cat; qty: number }[];
+};
+
 /** One line of a delivery being drafted on the Delivery tab. */
 export type DeliveryLine = { itemId: number; qty: number };
 

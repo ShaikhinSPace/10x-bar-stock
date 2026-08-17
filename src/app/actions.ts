@@ -137,18 +137,26 @@ export async function receiveDelivery(
       merged.set(id, (merged.get(id) ?? 0) + q);
     }
 
+    const inv = invoice.trim();
+    if (!inv) throw new Error("Enter the invoice number for this delivery");
+    if (inv.length > 60) throw new Error("That invoice number is too long");
+
     const ids = [...merged.keys()];
     const qtys = [...merged.values()];
     const batch = `D${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const inv = invoice.trim() || null;
     const sup = supplier.trim() || null;
 
+    // The `guard` CTE makes "not already booked" part of the same statement, so two
+    // people booking the same invoice at once can't both get through. Booking one
+    // invoice twice is the one mistake that silently inflates stock.
     const rows = await sql`
-      with lines as (
+      with guard as (
+        select 1 where not exists (select 1 from moves where invoice = ${inv})
+      ), lines as (
         select * from unnest(${ids}::int[], ${qtys}::numeric[]) as t(item_id, qty)
       ), upd as (
         update items i set store = i.store + l.qty
-        from lines l
+        from lines l, guard
         where i.id = l.item_id and not i.archived
         returning i.id, i.name, i.cat, l.qty
       )
@@ -159,6 +167,16 @@ export async function receiveDelivery(
       from upd
       returning id`;
 
+    if (!rows.length) {
+      const [dupe] = await sql`
+        select min(ts) as ts from moves where invoice = ${inv} group by invoice`;
+      if (dupe) {
+        throw new Error(
+          `Invoice ${inv} was already booked on ${new Date(dupe.ts).toLocaleDateString()}.`
+        );
+      }
+      throw new Error("Some bottles are no longer on the list — reload and try again.");
+    }
     if (rows.length !== ids.length) {
       throw new Error("Some bottles are no longer on the list — reload and try again.");
     }
