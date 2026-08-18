@@ -287,7 +287,6 @@ function Dashboard({
           </div>
         </div>
 
-        <ReorderTable rows={reorder} onPick={onPick} />
         <CategoryCard items={items} />
         <TrendCard moves={moves} now={now} />
 
@@ -297,6 +296,8 @@ function Dashboard({
           <WastageCard moves={moves} now={now} />
           <TopMoversCard moves={moves} now={now} />
         </div>
+
+        <ReorderTable rows={reorder} onPick={onPick} />
       </div>
     </>
   );

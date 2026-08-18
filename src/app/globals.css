@@ -1062,14 +1062,15 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   .tiles { grid-column: span 8; gap: 16px; grid-template-columns: repeat(4, 1fr); }
   .tile { padding: 18px 20px; display: flex; flex-direction: column; justify-content: center; min-height: 100%; }
   .tile .v { font-size: 28px; }
-  .at-reorder { grid-column: span 7; margin-bottom: 0; }
+  /* small parts first, the big scrollable list last */
   .at-cat { grid-column: span 5; margin-bottom: 0; }
   .at-trend { grid-column: span 7; margin-bottom: 0; }
   .at-side {
-    grid-column: span 5;
-    display: flex; flex-direction: column; gap: 16px;
+    grid-column: span 12;
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
   }
   .at-side .card { margin-bottom: 0; }
+  .at-reorder { grid-column: span 12; margin-bottom: 0; }
   .rscroll { max-height: 420px; }
   .rtable { font-size: 13px; }
   .rtable td { padding: 8px 10px 8px 3px; }
