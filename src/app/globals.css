@@ -504,7 +504,7 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .hero .split b { font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* ── stat tiles ── */
-.tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .tile {
   background: var(--surface);
   border: 1px solid var(--line);
@@ -1059,7 +1059,7 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   }
   .hero { grid-column: span 4; padding: 24px 26px; }
   .hero .fig { font-size: 60px; }
-  .tiles { grid-column: span 8; gap: 16px; }
+  .tiles { grid-column: span 8; gap: 16px; grid-template-columns: repeat(4, 1fr); }
   .tile { padding: 18px 20px; display: flex; flex-direction: column; justify-content: center; min-height: 100%; }
   .tile .v { font-size: 28px; }
   .at-reorder { grid-column: span 7; margin-bottom: 0; }
@@ -1076,7 +1076,7 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 }
 
 @media (max-width: 899px) {
-  .tiles { grid-template-columns: repeat(3, 1fr); }
+  .tiles { grid-template-columns: repeat(2, 1fr); }  /* 4 tiles: 2x2 on a phone */
   .tile .v { font-size: 20px; }
   .tile .k { font-size: 10.5px; }
   .rtable .hide-sm { display: none; }

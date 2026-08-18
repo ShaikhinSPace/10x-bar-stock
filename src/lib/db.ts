@@ -32,19 +32,44 @@ export async function getItems(): Promise<Item[]> {
   }));
 }
 
+/**
+ * Every move inside a time window, unbounded by count.
+ *
+ * The dashboard's "last 7 days" figures used to be filtered out of getMoves()'s
+ * newest-500, so once the bar logged more than 500 moves the totals silently got
+ * smaller. Bounding by time instead of count keeps them correct at any volume.
+ * Bucketing into days still happens client-side, so it stays in the viewer's
+ * timezone rather than the database's.
+ */
+export async function getRecentMoves(sinceMs: number): Promise<Move[]> {
+  const rows = await sql`
+    select id, ts, type, item_id, item_name, cat, qty, loc, to_loc, from_val, to_val,
+           user_name, batch, invoice, supplier, notes
+    from moves where ts >= ${new Date(sinceMs).toISOString()}
+    order by ts desc, id desc`;
+  return rows.map(toMove);
+}
+
 export async function getMoves(limit = 500): Promise<Move[]> {
   const rows = await sql`
     select id, ts, type, item_id, item_name, cat, qty, loc, to_loc, from_val, to_val,
            user_name, batch, invoice, supplier, notes
     from moves order by ts desc, id desc limit ${limit}`;
-  return rows.map((r) => ({
-    id: Number(r.id), ts: new Date(r.ts).toISOString(), type: r.type,
-    item_id: r.item_id, item_name: r.item_name, cat: r.cat,
-    qty: num(r.qty), loc: r.loc, to_loc: r.to_loc ?? null, from_val: num(r.from_val), to_val: num(r.to_val),
-    user_name: r.user_name,
-    batch: r.batch, invoice: r.invoice, supplier: r.supplier, notes: r.notes ?? null,
-  }));
+  return rows.map(toMove);
 }
+
+type Row = Record<string, unknown>;
+const toMove = (r: Row): Move => ({
+  id: Number(r.id), ts: new Date(r.ts as string).toISOString(), type: r.type as Move["type"],
+  item_id: r.item_id as number, item_name: r.item_name as string, cat: r.cat as Move["cat"],
+  qty: num(r.qty), loc: r.loc as Move["loc"], to_loc: (r.to_loc ?? null) as Move["to_loc"],
+  from_val: num(r.from_val), to_val: num(r.to_val),
+  user_name: r.user_name as string,
+  batch: (r.batch ?? null) as string | null,
+  invoice: (r.invoice ?? null) as string | null,
+  supplier: (r.supplier ?? null) as string | null,
+  notes: (r.notes ?? null) as string | null,
+});
 
 
 /**

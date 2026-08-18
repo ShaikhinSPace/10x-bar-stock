@@ -54,3 +54,5 @@ alter table moves add constraint moves_type_check check (type in ('give', 'recei
 create index if not exists moves_ts_idx on moves (ts desc);
 create index if not exists moves_item_ts_idx on moves (item_id, ts desc);
 create index if not exists moves_batch_idx on moves (batch) where batch is not null;
+-- the duplicate-invoice guard queries this on every delivery booking
+create index if not exists moves_invoice_idx on moves (invoice) where invoice is not null;

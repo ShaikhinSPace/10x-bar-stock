@@ -7,7 +7,7 @@ import {
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, batchSetReorderLevels, giveOut, logWaste, logout, receive,
+  addItem, addUser, archiveItem, giveOut, logWaste, logout, receive,
   receiveDelivery, setCount, setReorderLevel, setUserActive, transferBar, undoMove, type Result,
 } from "./actions";
 
@@ -121,9 +121,9 @@ const timeStr = (ts: number) =>
 /* ============================ shell ============================ */
 
 export function App({
-  user, items, moves, staff, deliveries, now, initialTab = "dashboard",
+  user, items, moves, recent, staff, deliveries, now, initialTab = "dashboard",
 }: {
-  user: SessionUser; items: Item[]; moves: Move[]; staff: Staff[];
+  user: SessionUser; items: Item[]; moves: Move[]; recent: Move[]; staff: Staff[];
   deliveries: Booked[]; now: number; initialTab?: Tab;
 }) {
   const [tab, setTab] = useState<Tab>(initialTab);
@@ -196,8 +196,8 @@ export function App({
               <button onClick={() => logout()}>Sign out</button>
             </div>
 
-            {tab === "dashboard" && <Dashboard items={items} moves={moves} now={now} onPick={setSheetId} />}
-            {tab === "stock" && <Stock items={items} moves={moves} now={now} onPick={setSheetId} />}
+            {tab === "dashboard" && <Dashboard items={items} moves={recent} now={now} onPick={setSheetId} />}
+            {tab === "stock" && <Stock items={items} moves={recent} now={now} onPick={setSheetId} />}
             {tab === "delivery" && <Delivery items={items} deliveries={deliveries} run={run} pending={pending} />}
             {tab === "activity" && (
               <Activity moves={moves} user={user} now={now} onToast={setToast}
@@ -280,6 +280,9 @@ function Dashboard({
           </div>
           <div className="tile">
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
+          </div>
+          <div className={`tile${waste7 > 0 ? " warnstate" : ""}`}>
+            <div className="v">{fmt(waste7)}</div><div className="k">Wasted · 7d</div>
           </div>
         </div>
 
