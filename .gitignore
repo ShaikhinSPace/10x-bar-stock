@@ -39,3 +39,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# exports downloaded from /api/export — real stock data, not source
+10x-bar-*.xlsx
