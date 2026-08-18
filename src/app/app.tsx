@@ -7,7 +7,7 @@ import {
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, giveOut, logWaste, logout, receive,
+  addItem, addUser, archiveItem, giveOut, logWaste, logout, receive, submitStocktake,
   receiveDelivery, setCount, setReorderLevel, setUserActive, transferBar, undoMove, type Result,
 } from "./actions";
 
@@ -197,7 +197,8 @@ export function App({
             </div>
 
             {tab === "dashboard" && <Dashboard items={items} moves={recent} now={now} onPick={setSheetId} />}
-            {tab === "stock" && <Stock items={items} moves={recent} now={now} onPick={setSheetId} />}
+            {tab === "stock" && <Stock items={items} moves={recent} now={now} user={user} pending={pending} run={run}
+                onPick={setSheetId} />}
             {tab === "delivery" && <Delivery items={items} deliveries={deliveries} run={run} pending={pending} />}
             {tab === "activity" && (
               <Activity moves={moves} user={user} now={now} onToast={setToast}
@@ -569,9 +570,14 @@ function ScannerModal({
 
 
 function Stock({
-  items, moves, now, onPick,
-}: { items: Item[]; moves: Move[]; now: number; onPick: (id: number) => void }) {
+  items, moves, now, user, pending, run, onPick,
+}: {
+  items: Item[]; moves: Move[]; now: number; user: SessionUser; pending: boolean;
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  onPick: (id: number) => void;
+}) {
   const [loc, setLoc] = useState<Loc>("store");
+  const [counting, setCounting] = useState(false);
   const [cat, setCat] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
@@ -610,6 +616,13 @@ function Stock({
 
   const cats = ["ALL", ...CATS.filter((c) => items.some((i) => i.cat === c))];
 
+  if (counting) {
+    return (
+      <Stocktake items={items} loc={loc} user={user} pending={pending} run={run}
+        onClose={() => setCounting(false)} />
+    );
+  }
+
   return (
     <>
       <div className="ptitle" style={{ justifyContent: "space-between" }}>
@@ -636,6 +649,21 @@ function Stock({
         ))}
       </div>
 
+      <button className="stk-start" onClick={() => setCounting(true)}>
+        <span className="si">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"
+              strokeLinejoin="round" />
+            <rect x="9" y="3" width="6" height="4" rx="1" />
+            <path d="M9 12h6M9 16h4" strokeLinecap="round" />
+          </svg>
+        </span>
+        <span className="st">
+          <span className="n">Count {LOC_LABEL[loc]}</span>
+          <span className="b">Walk the list once and enter what&apos;s actually there</span>
+        </span>
+        <span className="sgo">›</span>
+      </button>
 
       <div className="stats">
         {stats.map((s) => (
@@ -689,6 +717,162 @@ function Stock({
         })}
       </div>
     </>
+  );
+}
+
+/* ============================ stocktake ============================ */
+
+/**
+ * Count a whole location in one pass.
+ *
+ * Expected is shown and actual is typed beside it, because the variance between
+ * them IS the leakage signal - hiding the expected figure would make the count
+ * "purer" but throws away the number the owner actually needs.
+ *
+ * A blank row means "not counted" and is left completely alone. Only a typed value
+ * counts, and only a typed value that differs from expected is written.
+ */
+function Stocktake({
+  items, loc, user, onClose, run, pending,
+}: {
+  items: Item[]; loc: Loc; user: SessionUser; onClose: () => void; pending: boolean;
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+}) {
+  const draftKey = `stocktake:${loc}:${user.id}`;
+
+  // A stocktake takes many minutes; losing it to a tab switch is unacceptable, so the
+  // draft is written locally on every keystroke and read back here. Reading it in the
+  // initialiser rather than an effect is safe because this only mounts after a click,
+  // never during SSR.
+  const [initial] = useState<Record<number, string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(draftKey) ?? "{}");
+      return saved && typeof saved === "object" ? saved : {};
+    } catch {
+      return {}; // a corrupt draft is not worth blocking the count over
+    }
+  });
+  const [counts, setCounts] = useState<Record<number, string>>(initial);
+  const [q, setQ] = useState("");
+  const restored = Object.keys(initial).length > 0;
+
+  useEffect(() => {
+    try {
+      if (Object.keys(counts).length) localStorage.setItem(draftKey, JSON.stringify(counts));
+      else localStorage.removeItem(draftKey);
+    } catch { /* private mode / quota - the count still works, just isn't recoverable */ }
+  }, [counts, draftKey]);
+
+  const rows = useMemo(() => {
+    const out = [...items].sort(
+      (a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name)
+    );
+    const needle = q.trim().toLowerCase();
+    return needle ? out.filter((i) => i.name.toLowerCase().includes(needle)) : out;
+  }, [items, q]);
+
+  const entered = Object.entries(counts).filter(([, v]) => v.trim() !== "");
+  const parsed = entered.map(([id, v]) => {
+    const item = items.find((i) => i.id === Number(id));
+    return { id: Number(id), item, value: Number(v), was: item ? item[loc] : 0 };
+  }).filter((r) => r.item && Number.isFinite(r.value) && r.value >= 0);
+  const variances = parsed.filter((r) => r.value !== r.was);
+
+  function submit() {
+    if (!variances.length) return;
+    run(
+      () => submitStocktake(loc, variances.map((r) => ({ itemId: r.id, value: r.value }))),
+      `${LOC_SHORT[loc]} stocktake saved — ${variances.length} correction${variances.length === 1 ? "" : "s"}`,
+      false
+    );
+    setCounts({});
+    try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
+    onClose();
+  }
+
+  /** Enter jumps to the next field so a count is one continuous run. */
+  function onKey(e: React.KeyboardEvent<HTMLInputElement>, idx: number) {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const inputs = document.querySelectorAll<HTMLInputElement>("[data-count-input]");
+    inputs[idx + 1]?.focus();
+    inputs[idx + 1]?.select();
+  }
+
+  return (
+    <div className="stk">
+      <div className="stk-head">
+        <div>
+          <div className="ptitle" style={{ margin: 0 }}>
+            Stocktake <span className="sub">{LOC_LABEL[loc]}</span>
+          </div>
+          <div className="hint" style={{ marginTop: 4 }}>
+            Type what you actually count. Leave a row blank if you didn&apos;t count it.
+          </div>
+        </div>
+        <button className="btn ghost" onClick={onClose}>Cancel</button>
+      </div>
+
+      {restored && (
+        <div className="stk-restored">
+          Picked up an unfinished count — {entered.length} row{entered.length === 1 ? "" : "s"} restored.
+        </div>
+      )}
+
+      <div className="search">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
+        </svg>
+        <input placeholder="Jump to a bottle…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+      </div>
+
+      <div className="stk-list">
+        <div className="stk-row stk-hdr">
+          <span className="s-n">Bottle</span>
+          <span className="s-e">Expected</span>
+          <span className="s-a">Counted</span>
+          <span className="s-v">Variance</span>
+        </div>
+        {rows.map((i, idx) => {
+          const raw = counts[i.id] ?? "";
+          const has = raw.trim() !== "";
+          const val = Number(raw);
+          const ok = has && Number.isFinite(val) && val >= 0;
+          const diff = ok ? Math.round((val - i[loc]) * 100) / 100 : null;
+          return (
+            <div className={`stk-row${ok && diff !== 0 ? " has-var" : ""}`} key={i.id}>
+              <span className="s-n">
+                <span className="nm">{i.name}</span>
+                <span className="ct">{cap(i.cat)}</span>
+              </span>
+              <span className="s-e">{fmt(i[loc])}</span>
+              <span className="s-a">
+                <input
+                  data-count-input type="number" inputMode="decimal" min="0"
+                  step={loc === "store" ? "1" : "0.05"} placeholder="—" value={raw}
+                  onKeyDown={(e) => onKey(e, idx)}
+                  onChange={(e) => setCounts((c) => ({ ...c, [i.id]: e.target.value }))}
+                />
+              </span>
+              <span className={`s-v${diff === null ? "" : diff > 0 ? " up" : diff < 0 ? " down" : " same"}`}>
+                {diff === null ? "" : diff === 0 ? "✓" : `${diff > 0 ? "+" : ""}${fmt(diff)}`}
+              </span>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="stk-foot">
+        <div className="stk-sum">
+          <b>{entered.length}</b> of {items.length} counted
+          {variances.length > 0 && <span className="vwarn"> · {variances.length} variance{variances.length === 1 ? "" : "s"}</span>}
+        </div>
+        <button className="commit" disabled={pending || !variances.length} onClick={submit}>
+          {variances.length ? `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}` : "No changes to save"}
+        </button>
+      </div>
+    </div>
   );
 }
 

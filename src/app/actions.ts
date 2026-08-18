@@ -184,6 +184,72 @@ export async function receiveDelivery(
   });
 }
 
+/**
+ * Submit a whole stocktake for one location in a single statement.
+ *
+ * Counting a bar bottle-by-bottle through the item sheet is six interactions per
+ * bottle across ~45 bottles, which is how stocktakes end up not happening. Here the
+ * counter walks the list once and submits.
+ *
+ * Only rows whose count actually moved are written: a no-change row updates nothing
+ * and logs nothing, so a `count` entry in the log always means something shifted.
+ * Rows the counter never filled in are simply absent - a blank is "not counted",
+ * never zero.
+ */
+export async function submitStocktake(
+  loc: Loc, lines: { itemId: number; value: number }[]
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(loc)) throw new Error("Unknown location");
+    if (!Array.isArray(lines) || !lines.length) throw new Error("Nothing counted yet");
+    if (lines.length > 1000) throw new Error("That's too many lines for one stocktake");
+
+    const seen = new Map<number, number>();
+    for (const l of lines) {
+      const id = Number(l.itemId);
+      if (!Number.isInteger(id)) throw new Error("Unknown bottle in the count");
+      // store is whole bottles; the bars are counted to 2dp
+      seen.set(id, loc === "store"
+        ? whole(l.value, "Count")
+        : partial(l.value, "Count"));
+    }
+
+    const ids = [...seen.keys()];
+    const vals = [...seen.values()];
+    const batch = `S${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+    const rows = await sql`
+      with lines as (
+        select * from unnest(${ids}::int[], ${vals}::numeric[]) as t(item_id, val)
+      ), prev as (
+        select i.id, i.name, i.cat, l.val,
+               case ${loc}::text
+                 when 'store' then i.store when 'patio' then i.patio else i.back
+               end as was
+        from items i join lines l on l.item_id = i.id
+        where not i.archived
+      ), changed as (
+        select * from prev where val <> was
+      ), upd as (
+        update items i set
+          store = case when ${loc}::text = 'store' then c.val else i.store end,
+          patio = case when ${loc}::text = 'patio' then c.val else i.patio end,
+          back  = case when ${loc}::text = 'back'  then c.val else i.back  end
+        from changed c where i.id = c.id
+        returning i.id
+      )
+      insert into moves
+        (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, batch)
+      select 'count', c.id, c.name, c.cat, ${loc}::text, c.was, c.val, ${u.id}, ${u.name}, ${batch}
+      from changed c join upd on upd.id = c.id
+      returning id`;
+
+    if (!rows.length) throw new Error("Every count matched what was already recorded.");
+    refresh();
+  });
+}
+
 /** Set the exact count at one location. This is how bar counts get entered. */
 export async function setCount(itemId: number, loc: Loc, value: number): Promise<Result> {
   return attempt(async () => {
