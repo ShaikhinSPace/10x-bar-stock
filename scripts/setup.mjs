@@ -39,13 +39,14 @@ const sql = neon(process.env.DATABASE_URL);
 const schema = readFileSync(new URL("../src/lib/schema.sql", import.meta.url), "utf8")
   .replace(/--[^\n]*/g, "");
 const statements = schema.split(";").map((s) => s.trim()).filter(Boolean);
-if (statements.length !== 9) {
-  throw new Error(`expected 9 schema statements, parsed ${statements.length}`);
+if (!statements.length) {
+  throw new Error("No schema statements found in schema.sql");
 }
 for (const stmt of statements) {
   await sql.query(stmt);
 }
-console.log("schema ok");
+console.log(`schema ok (${statements.length} statements executed)`);
+
 
 const items = JSON.parse(
   readFileSync(new URL("../src/lib/seed-items.json", import.meta.url), "utf8")

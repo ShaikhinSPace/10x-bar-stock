@@ -56,7 +56,7 @@ try {
   assert.equal(await val(id, "store"), 7, "overdraw must not change store");
 
   // --- count at a bar keeps 2dp, and records the pre-update value ---
-  rows = await sql`
+  const countRows = await sql`
     with prev as (
       select id, name, cat,
              case 'patio'::text when 'store' then store when 'patio' then patio else back end as v
@@ -67,13 +67,48 @@ try {
     insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
     select 'count', prev.id, prev.name, prev.cat, 'patio', prev.v, 1.75, ${userId}, 'Check Runner'
     from prev join upd on upd.id = prev.id returning id, from_val, to_val`;
-  assert.equal(rows.length, 1, "count should log one move");
-  assert.equal(Number(rows[0].from_val), 3, "count must log the value from BEFORE the update");
+  assert.equal(countRows.length, 1, "count should log one move");
+  assert.equal(Number(countRows[0].from_val), 3, "count must log the value from BEFORE the update");
   assert.equal(await val(id, "patio"), 1.75, "bars must keep partial bottles");
 
+  // --- waste: subtracts from specified location and logs notes ---
+  rows = await sql`
+    with prev as (select id, name, cat from items where id = ${id} and not archived),
+    upd as (
+      update items set patio = patio - 0.5
+      where id = ${id} and not archived and patio >= 0.5 returning id
+    )
+    insert into moves (type, item_id, item_name, cat, qty, loc, notes, user_id, user_name)
+    select 'waste', prev.id, prev.name, prev.cat, 0.5, 'patio', 'Spill / Breakage', ${userId}, 'Check Runner'
+    from prev join upd on upd.id = prev.id returning id`;
+  assert.equal(rows.length, 1, "waste should log one move");
+  assert.equal(await val(id, "patio"), 1.25, "patio should drop to 1.25 after 0.5 waste");
+
+  // --- transfer: moves stock between patio and back bar ---
+  rows = await sql`
+    with prev as (select id, name, cat from items where id = ${id} and not archived),
+    upd as (
+      update items set patio = patio - 0.25, back = back + 0.25
+      where id = ${id} and not archived and patio >= 0.25 returning id
+    )
+    insert into moves (type, item_id, item_name, cat, qty, loc, to_loc, user_id, user_name)
+    select 'transfer', prev.id, prev.name, prev.cat, 0.25, 'patio', 'back', ${userId}, 'Check Runner'
+    from prev join upd on upd.id = prev.id returning id`;
+  assert.equal(rows.length, 1, "transfer should log one move");
+  assert.equal(await val(id, "patio"), 1.0, "patio should drop to 1.0");
+  assert.equal(await val(id, "back"), 0.25, "back should rise to 0.25");
+
+  // --- getMoves query check for to_loc and notes ---
+  const [latestMove] = await sql`
+    select id, type, loc, to_loc, notes from moves where item_id = ${id} order by id desc limit 1`;
+  assert.equal(latestMove.type, "transfer");
+  assert.equal(latestMove.to_loc, "back");
+
   // --- undo that count puts the bar back ---
-  await sql`update items set patio = ${rows[0].from_val} where id = ${id}`;
+  await sql`update items set patio = ${countRows[0].from_val}, back = 0 where id = ${id}`;
   assert.equal(await val(id, "patio"), 3, "undo should restore the previous count");
+
+
 
   // --- constraints: store stays whole and nothing goes negative ---
   await assert.rejects(
@@ -121,6 +156,81 @@ try {
   const tagged = await sql`select count(*) c from moves where batch = ${BATCH}`;
   assert.equal(Number(tagged[0].c), 2, "every line of a delivery shares one batch id");
 
+  // --- the same invoice cannot be booked twice (that would inflate stock silently) ---
+  const before = await val(d2, "store");
+  const second = await sql`
+    with guard as (
+      select 1 where not exists (select 1 from moves where invoice = ${"INV-1"})
+    ), lines as (
+      select * from unnest(${[d2]}::int[], ${[99]}::numeric[]) as t(item_id, qty)
+    ), upd as (
+      update items i set store = i.store + l.qty
+      from lines l, guard
+      where i.id = l.item_id and not i.archived
+      returning i.id, i.name, i.cat, l.qty
+    )
+    insert into moves
+      (type, item_id, item_name, cat, qty, loc, user_id, user_name, batch, invoice)
+    select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
+           ${userId}, 'Check Runner', ${BATCH + "_dupe"}, ${"INV-1"}
+    from upd returning id`;
+  assert.equal(second.length, 0, "re-booking a used invoice must insert nothing");
+  assert.equal(await val(d2, "store"), before, "a rejected re-book must not change stock");
+
+  // --- a delivery rebuilds from its batch, lines and all ---
+  const [grouped] = await sql`
+    select invoice, supplier, sum(qty) as bottles, count(*) as n,
+           json_agg(json_build_object('item', item_name, 'qty', qty) order by item_name) as lines
+    from moves where batch = ${BATCH} group by invoice, supplier`;
+  assert.equal(grouped.invoice, "INV-1", "the delivery keeps its invoice number");
+  assert.equal(Number(grouped.bottles), 29, "3 + 2 merged, plus 24 = 29 bottles");
+  assert.equal(grouped.lines.length, 2, "both lines come back with the delivery");
+
+  // --- a stocktake writes only what moved, and never touches uncounted rows ---
+  await sql`update items set patio = 4 where id = ${d1}`;   // expected 4
+  await sql`update items set patio = 9 where id = ${d2}`;   // expected 9, will be left uncounted
+  const STK = `${NAME}_stk`;
+  const stk = await sql`
+    with lines as (
+      select * from unnest(${[d1]}::int[], ${[2.5]}::numeric[]) as t(item_id, val)
+    ), prev as (
+      select i.id, i.name, i.cat, l.val,
+             case 'patio'::text when 'store' then i.store when 'patio' then i.patio else i.back end as was
+      from items i join lines l on l.item_id = i.id where not i.archived
+    ), changed as (
+      select * from prev where val <> was
+    ), upd as (
+      update items i set patio = c.val from changed c where i.id = c.id returning i.id
+    )
+    insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, batch)
+    select 'count', c.id, c.name, c.cat, 'patio', c.was, c.val, ${userId}, 'Check Runner', ${STK}
+    from changed c join upd on upd.id = c.id
+    returning id`;
+  assert.equal(stk.length, 1, "only the counted row is written");
+  assert.equal(await val(d1, "patio"), 2.5, "a counted row takes the counted value");
+  assert.equal(await val(d2, "patio"), 9, "an UNCOUNTED row must be left completely alone");
+  const [logged] = await sql`select from_val, to_val from moves where batch = ${STK}`;
+  assert.equal(Number(logged.from_val), 4, "variance is logged against the pre-count value");
+  assert.equal(Number(logged.to_val), 2.5, "bars keep partials through a stocktake");
+
+  // a count that matches expected writes nothing at all
+  const noop = await sql`
+    with lines as (
+      select * from unnest(${[d1]}::int[], ${[2.5]}::numeric[]) as t(item_id, val)
+    ), prev as (
+      select i.id, i.name, i.cat, l.val, i.patio as was
+      from items i join lines l on l.item_id = i.id where not i.archived
+    ), changed as (
+      select * from prev where val <> was
+    ), upd as (
+      update items i set patio = c.val from changed c where i.id = c.id returning i.id
+    )
+    insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, batch)
+    select 'count', c.id, c.name, c.cat, 'patio', c.was, c.val, ${userId}, 'Check Runner', ${STK + "_2"}
+    from changed c join upd on upd.id = c.id
+    returning id`;
+  assert.equal(noop.length, 0, "a count matching expected logs nothing");
+
   // --- hashes written by the scripts must verify the way src/lib/auth.ts verifies ---
   // Mirrors verifyPassword() exactly; if the two drift apart, logins break silently.
   const { hashPassword } = await import("./hash.mjs");
@@ -140,6 +250,7 @@ try {
 } finally {
   const names = [NAME, NAME2, NAME3];
   await sql`delete from moves where item_name = any(${names}::text[])`;
+  await sql`delete from moves where batch = any(${[BATCH, BATCH + "_dupe", `${NAME}_stk`, `${NAME}_stk_2`]}::text[])`;
   await sql`delete from items where name = any(${names}::text[])`;
   if (userId) await sql`delete from users where id = ${userId}`;
 }

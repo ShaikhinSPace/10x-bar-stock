@@ -137,18 +137,26 @@ export async function receiveDelivery(
       merged.set(id, (merged.get(id) ?? 0) + q);
     }
 
+    const inv = invoice.trim();
+    if (!inv) throw new Error("Enter the invoice number for this delivery");
+    if (inv.length > 60) throw new Error("That invoice number is too long");
+
     const ids = [...merged.keys()];
     const qtys = [...merged.values()];
     const batch = `D${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
-    const inv = invoice.trim() || null;
     const sup = supplier.trim() || null;
 
+    // The `guard` CTE makes "not already booked" part of the same statement, so two
+    // people booking the same invoice at once can't both get through. Booking one
+    // invoice twice is the one mistake that silently inflates stock.
     const rows = await sql`
-      with lines as (
+      with guard as (
+        select 1 where not exists (select 1 from moves where invoice = ${inv})
+      ), lines as (
         select * from unnest(${ids}::int[], ${qtys}::numeric[]) as t(item_id, qty)
       ), upd as (
         update items i set store = i.store + l.qty
-        from lines l
+        from lines l, guard
         where i.id = l.item_id and not i.archived
         returning i.id, i.name, i.cat, l.qty
       )
@@ -159,9 +167,85 @@ export async function receiveDelivery(
       from upd
       returning id`;
 
+    if (!rows.length) {
+      const [dupe] = await sql`
+        select min(ts) as ts from moves where invoice = ${inv} group by invoice`;
+      if (dupe) {
+        throw new Error(
+          `Invoice ${inv} was already booked on ${new Date(dupe.ts).toLocaleDateString()}.`
+        );
+      }
+      throw new Error("Some bottles are no longer on the list — reload and try again.");
+    }
     if (rows.length !== ids.length) {
       throw new Error("Some bottles are no longer on the list — reload and try again.");
     }
+    refresh();
+  });
+}
+
+/**
+ * Submit a whole stocktake for one location in a single statement.
+ *
+ * Counting a bar bottle-by-bottle through the item sheet is six interactions per
+ * bottle across ~45 bottles, which is how stocktakes end up not happening. Here the
+ * counter walks the list once and submits.
+ *
+ * Only rows whose count actually moved are written: a no-change row updates nothing
+ * and logs nothing, so a `count` entry in the log always means something shifted.
+ * Rows the counter never filled in are simply absent - a blank is "not counted",
+ * never zero.
+ */
+export async function submitStocktake(
+  loc: Loc, lines: { itemId: number; value: number }[]
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(loc)) throw new Error("Unknown location");
+    if (!Array.isArray(lines) || !lines.length) throw new Error("Nothing counted yet");
+    if (lines.length > 1000) throw new Error("That's too many lines for one stocktake");
+
+    const seen = new Map<number, number>();
+    for (const l of lines) {
+      const id = Number(l.itemId);
+      if (!Number.isInteger(id)) throw new Error("Unknown bottle in the count");
+      // store is whole bottles; the bars are counted to 2dp
+      seen.set(id, loc === "store"
+        ? whole(l.value, "Count")
+        : partial(l.value, "Count"));
+    }
+
+    const ids = [...seen.keys()];
+    const vals = [...seen.values()];
+    const batch = `S${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+    const rows = await sql`
+      with lines as (
+        select * from unnest(${ids}::int[], ${vals}::numeric[]) as t(item_id, val)
+      ), prev as (
+        select i.id, i.name, i.cat, l.val,
+               case ${loc}::text
+                 when 'store' then i.store when 'patio' then i.patio else i.back
+               end as was
+        from items i join lines l on l.item_id = i.id
+        where not i.archived
+      ), changed as (
+        select * from prev where val <> was
+      ), upd as (
+        update items i set
+          store = case when ${loc}::text = 'store' then c.val else i.store end,
+          patio = case when ${loc}::text = 'patio' then c.val else i.patio end,
+          back  = case when ${loc}::text = 'back'  then c.val else i.back  end
+        from changed c where i.id = c.id
+        returning i.id
+      )
+      insert into moves
+        (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, batch)
+      select 'count', c.id, c.name, c.cat, ${loc}::text, c.was, c.val, ${u.id}, ${u.name}, ${batch}
+      from changed c join upd on upd.id = c.id
+      returning id`;
+
+    if (!rows.length) throw new Error("Every count matched what was already recorded.");
     refresh();
   });
 }
@@ -197,6 +281,77 @@ export async function setCount(itemId: number, loc: Loc, value: number): Promise
   });
 }
 
+/** Log a wasted, broken, or spilled bottle. */
+export async function logWaste(
+  itemId: number, qty: number, loc: Loc, reason: string
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(loc)) throw new Error("Unknown location");
+    const q = loc === "store" ? whole(qty, "Waste quantity") : partial(qty, "Waste quantity");
+    if (q <= 0) throw new Error("Quantity must be greater than zero");
+    const r = reason.trim() || "Spill / Breakage";
+
+    const rows = await sql`
+      with prev as (
+        select id, name, cat from items where id = ${itemId} and not archived
+      ), upd as (
+        update items set
+          store = store - case when ${loc}::text = 'store' then ${q} else 0 end,
+          patio = patio - case when ${loc}::text = 'patio' then ${q} else 0 end,
+          back  = back  - case when ${loc}::text = 'back'  then ${q} else 0 end
+        where id = ${itemId} and not archived and
+          (case ${loc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
+        returning id
+      )
+      insert into moves (type, item_id, item_name, cat, qty, loc, notes, user_id, user_name)
+      select 'waste', prev.id, prev.name, prev.cat, ${q}, ${loc}::text, ${r}, ${u.id}, ${u.name}
+      from prev join upd on upd.id = prev.id
+      returning id`;
+
+    if (!rows.length) throw new Error("Not enough stock in that location to record this waste.");
+    refresh();
+  });
+}
+
+/** Transfer stock directly between locations (e.g. Patio Bar <-> Back Bar). */
+export async function transferBar(
+  itemId: number, qty: number, fromLoc: Loc, toLoc: Loc
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(fromLoc) || !isLoc(toLoc)) throw new Error("Invalid location selection");
+    if (fromLoc === toLoc) throw new Error("Source and destination bars must be different");
+
+    const isWhole = fromLoc === "store" || toLoc === "store";
+    const q = isWhole ? whole(qty, "Transfer quantity") : partial(qty, "Transfer quantity");
+    if (q <= 0) throw new Error("Transfer quantity must be greater than zero");
+
+    const rows = await sql`
+      with prev as (
+        select id, name, cat from items where id = ${itemId} and not archived
+      ), upd as (
+        update items set
+          store = store - case when ${fromLoc}::text = 'store' then ${q} else 0 end
+                        + case when ${toLoc}::text   = 'store' then ${q} else 0 end,
+          patio = patio - case when ${fromLoc}::text = 'patio' then ${q} else 0 end
+                        + case when ${toLoc}::text   = 'patio' then ${q} else 0 end,
+          back  = back  - case when ${fromLoc}::text = 'back'  then ${q} else 0 end
+                        + case when ${toLoc}::text   = 'back'  then ${q} else 0 end
+        where id = ${itemId} and not archived and
+          (case ${fromLoc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
+        returning id
+      )
+      insert into moves (type, item_id, item_name, cat, qty, loc, to_loc, user_id, user_name)
+      select 'transfer', prev.id, prev.name, prev.cat, ${q}, ${fromLoc}::text, ${toLoc}::text, ${u.id}, ${u.name}
+      from prev join upd on upd.id = prev.id
+      returning id`;
+
+    if (!rows.length) throw new Error("Not enough stock in the source location to complete transfer.");
+    refresh();
+  });
+}
+
 /**
  * Reverse a move. Only the newest move for that item can be undone — reversing an
  * older one would silently clobber whatever was logged after it.
@@ -227,6 +382,23 @@ export async function undoMove(moveId: number): Promise<Result> {
         where id = ${m.item_id}`;
     } else if (m.type === "receive") {
       await sql`update items set store = store - ${m.qty} where id = ${m.item_id}`;
+    } else if (m.type === "waste") {
+      await sql`
+        update items set
+          store = store + case when ${m.loc}::text = 'store' then ${m.qty} else 0 end,
+          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end,
+          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
+        where id = ${m.item_id}`;
+    } else if (m.type === "transfer") {
+      await sql`
+        update items set
+          store = store + case when ${m.loc}::text = 'store' then ${m.qty} else 0 end
+                        - case when ${m.to_loc}::text = 'store' then ${m.qty} else 0 end,
+          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end
+                        - case when ${m.to_loc}::text = 'patio' then ${m.qty} else 0 end,
+          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
+                        - case when ${m.to_loc}::text = 'back'  then ${m.qty} else 0 end
+        where id = ${m.item_id}`;
     } else {
       await sql`
         update items set
@@ -239,6 +411,7 @@ export async function undoMove(moveId: number): Promise<Result> {
     refresh();
   });
 }
+
 
 /* ---------------- Manage (owner only) ---------------- */
 
@@ -267,6 +440,18 @@ export async function setReorderLevel(itemId: number, rl: number): Promise<Resul
     refresh();
   });
 }
+
+export async function batchSetReorderLevels(updates: { id: number; rl: number }[]): Promise<Result> {
+  return attempt(async () => {
+    await requireOwner();
+    if (!Array.isArray(updates) || !updates.length) throw new Error("No updates provided");
+    for (const u of updates) {
+      await sql`update items set rl = ${partial(u.rl, "Reorder level")} where id = ${u.id}`;
+    }
+    refresh();
+  });
+}
+
 
 /** Archive, never delete — the activity log references the row. */
 export async function archiveItem(itemId: number): Promise<Result> {

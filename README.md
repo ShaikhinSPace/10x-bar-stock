@@ -66,9 +66,24 @@ a single SQL statement, so it is all-or-nothing — stock and its log entries ap
 together or not at all. Duplicate lines for the same bottle are merged before
 booking.
 
+## Exporting to Excel
+
+Owners get an **Export to Excel** card on the Manage tab: stock list, reorder list,
+deliveries, full activity, or all four as separate sheets in one workbook. Each
+downloads a real `.xlsx` from `/api/export?kind=…`, which re-checks the session
+itself — a staff account gets a 403 whether or not the button is on screen.
+
+`src/lib/xlsx.ts` writes the workbook directly (an xlsx is a ZIP of OOXML parts)
+rather than pulling in a spreadsheet dependency. `scripts/check-xlsx.mjs`
+round-trips it — run it after touching that file:
+
+```bash
+node --experimental-strip-types scripts/check-xlsx.mjs
+```
+
 ## Roles
 
-| | Give out / Receive / Count | Undo own entry | Manage bottles & staff |
+| | Give out / Receive / Count | Undo own entry | Manage bottles, staff & export |
 |---|---|---|---|
 | **staff** | yes (incl. deliveries) | yes | no |
 | **owner** | yes (incl. deliveries) | any entry | yes |
