@@ -1433,3 +1433,30 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   .stk-row .s-a input { padding: 8px 6px; font-size: 14px; }
   .stk-foot .commit { width: 100%; }
 }
+
+/* ── manage: popover triggers (Add staff / Export) ── */
+.btn.sm { padding: 8px 12px; font-size: 13px; border-radius: 10px; }
+.mg-popover-trigger { margin-left: auto; position: relative; }
+.popover-anchor { position: relative; }
+.popover {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 40;
+  width: min(360px, calc(100vw - 32px));
+  background: var(--surface);
+  border: 1px solid var(--line-2);
+  border-radius: var(--r);
+  box-shadow: var(--shadow-lg);
+  padding: 18px 16px 16px;
+}
+.popover.popover-wide { width: min(560px, calc(100vw - 32px)); }
+.popover-close {
+  position: absolute; top: 10px; right: 10px;
+  width: 26px; height: 26px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; line-height: 1; color: var(--txt-3);
+}
+.popover-close:hover { background: var(--surface-2); color: var(--txt); }
+.popover .frm { margin-top: 4px; }
+.popover .xgrid { margin-top: 4px; }

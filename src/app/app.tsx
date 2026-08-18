@@ -1404,6 +1404,27 @@ function Activity({
 
 /* ============================ manage (owner) ============================ */
 
+/** A small dismissable panel anchored to its trigger button — closes on an
+ * outside click, Escape, or its own × — shared by the Add staff and Export
+ * popovers below since both need identical dismiss behavior. */
+function usePopoverClose(active: boolean, onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [active, onClose]);
+  return ref;
+}
+
 function Manage({
   items, staff, user, run, pending,
 }: {
@@ -1420,6 +1441,11 @@ function Manage({
   const [uUser, setUUser] = useState("");
   const [uPass, setUPass] = useState("");
   const [uRole, setURole] = useState<"owner" | "staff">("staff");
+
+  const [addStaffOpen, setAddStaffOpen] = useState(false);
+  const addStaffRef = usePopoverClose(addStaffOpen, () => setAddStaffOpen(false));
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = usePopoverClose(exportOpen, () => setExportOpen(false));
 
   const shown = useMemo(() => {
     const out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
@@ -1471,6 +1497,125 @@ function Manage({
 
       <div className="card">
         <div className="ch">
+          <h3>Staff</h3>
+          <span className="badge">{staff.length}</span>
+          <div className="popover-anchor mg-popover-trigger" ref={addStaffRef}>
+            <button className="btn sm" onClick={() => setAddStaffOpen((o) => !o)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+              </svg>
+              Add staff
+            </button>
+            {addStaffOpen && (
+              <div className="popover">
+                <button className="popover-close" aria-label="Close" onClick={() => setAddStaffOpen(false)}>×</button>
+                <div className="frm">
+                  <div className="frow">
+                    <div className="fld">
+                      <label>Name</label>
+                      <input value={uName} onChange={(e) => setUName(e.target.value)} autoComplete="off" />
+                    </div>
+                    <div className="fld">
+                      <label>Username</label>
+                      <input value={uUser} onChange={(e) => setUUser(e.target.value)}
+                        autoCapitalize="none" autoComplete="off" />
+                    </div>
+                  </div>
+                  <div className="frow">
+                    <div className="fld">
+                      <label>Password</label>
+                      <input type="password" value={uPass} onChange={(e) => setUPass(e.target.value)}
+                        autoComplete="new-password" />
+                    </div>
+                    <div className="fld">
+                      <label>Role</label>
+                      <select value={uRole} onChange={(e) => setURole(e.target.value as "owner" | "staff")}>
+                        <option value="staff">Staff</option>
+                        <option value="owner">Owner</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button className="btn" disabled={pending} onClick={() => {
+                    run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
+                    setUPass("");
+                  }}>
+                    Add person
+                  </button>
+                  <div className="hint">
+                    Staff can give out, receive and count. Owners can also edit bottles and staff.
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {staff.map((s) => (
+          <div className={`urow${s.active ? "" : " off"}`} key={s.id}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div className="t">{s.name}</div>
+              <div className="s">@{s.username} · {s.role}{s.active ? "" : " · disabled"}</div>
+            </div>
+            {s.id !== user.id && (
+              <button className="toggle"
+                onClick={() => run(() => setUserActive(s.id, !s.active),
+                  s.active ? `${s.name} disabled` : `${s.name} re-enabled`, false)}>
+                {s.active ? "Disable" : "Enable"}
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+
+      <div className="card">
+        <div className="ch">
+          <h3>Export to Excel</h3>
+          <div className="popover-anchor mg-popover-trigger" ref={exportRef}>
+            <button className="btn sm" onClick={() => setExportOpen((o) => !o)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
+              </svg>
+              Export
+            </button>
+            {exportOpen && (
+              <div className="popover popover-wide">
+                <button className="popover-close" aria-label="Close" onClick={() => setExportOpen(false)}>×</button>
+                <div className="xgrid">
+                  {([
+                    ["stock", "Stock list", "Every bottle, per location, with totals and status"],
+                    ["reorder", "Reorder list", "Only what is at or below its reorder point"],
+                    ["deliveries", "Deliveries", "One row per delivery line, with invoice and supplier"],
+                    ["activity", "Full activity", "Every give-out, delivery and count ever logged"],
+                    ["all", "Everything", "All four as separate sheets in one workbook"],
+                  ] as const).map(([kind, title, blurb]) => (
+                    <a className={`xcard${kind === "all" ? " xall" : ""}`} key={kind}
+                       href={`/api/export?kind=${kind}`} download>
+                      <span className="xi">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" strokeWidth="2">
+                          <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
+                        </svg>
+                      </span>
+                      <span className="xt">
+                        <span className="n">{title}</span>
+                        <span className="b">{blurb}</span>
+                      </span>
+                    </a>
+                  ))}
+                </div>
+                <div className="hint">
+                  Downloads a real .xlsx — open it straight in Excel or Numbers.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="ch">
           <h3>All bottles</h3>
           <span className="badge">{items.length}</span>
         </div>
@@ -1508,94 +1653,6 @@ function Manage({
                   strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             </button>
-          </div>
-        ))}
-      </div>
-
-
-      <div className="card">
-        <div className="ch"><h3>Export to Excel</h3></div>
-        <div className="xgrid">
-          {([
-            ["stock", "Stock list", "Every bottle, per location, with totals and status"],
-            ["reorder", "Reorder list", "Only what is at or below its reorder point"],
-            ["deliveries", "Deliveries", "One row per delivery line, with invoice and supplier"],
-            ["activity", "Full activity", "Every give-out, delivery and count ever logged"],
-            ["all", "Everything", "All four as separate sheets in one workbook"],
-          ] as const).map(([kind, title, blurb]) => (
-            <a className={`xcard${kind === "all" ? " xall" : ""}`} key={kind}
-               href={`/api/export?kind=${kind}`} download>
-              <span className="xi">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
-                     stroke="currentColor" strokeWidth="2">
-                  <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
-                </svg>
-              </span>
-              <span className="xt">
-                <span className="n">{title}</span>
-                <span className="b">{blurb}</span>
-              </span>
-            </a>
-          ))}
-        </div>
-        <div className="hint">
-          Downloads a real .xlsx — open it straight in Excel or Numbers.
-        </div>
-      </div>
-
-      <div className="card addcard">
-        <div className="ch"><h3>Staff</h3><span className="badge">{staff.length}</span></div>
-        <div className="frm">
-          <div className="frow">
-            <div className="fld">
-              <label>Name</label>
-              <input value={uName} onChange={(e) => setUName(e.target.value)} autoComplete="off" />
-            </div>
-            <div className="fld">
-              <label>Username</label>
-              <input value={uUser} onChange={(e) => setUUser(e.target.value)}
-                autoCapitalize="none" autoComplete="off" />
-            </div>
-          </div>
-          <div className="frow">
-            <div className="fld">
-              <label>Password</label>
-              <input type="password" value={uPass} onChange={(e) => setUPass(e.target.value)}
-                autoComplete="new-password" />
-            </div>
-            <div className="fld">
-              <label>Role</label>
-              <select value={uRole} onChange={(e) => setURole(e.target.value as "owner" | "staff")}>
-                <option value="staff">Staff</option>
-                <option value="owner">Owner</option>
-              </select>
-            </div>
-          </div>
-          <button className="btn" disabled={pending} onClick={() => {
-            run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
-            setUPass("");
-          }}>
-            Add person
-          </button>
-          <div className="hint">
-            Staff can give out, receive and count. Owners can also edit bottles and staff.
-          </div>
-        </div>
-
-        {staff.map((s) => (
-          <div className={`urow${s.active ? "" : " off"}`} key={s.id}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div className="t">{s.name}</div>
-              <div className="s">@{s.username} · {s.role}{s.active ? "" : " · disabled"}</div>
-            </div>
-            {s.id !== user.id && (
-              <button className="toggle"
-                onClick={() => run(() => setUserActive(s.id, !s.active),
-                  s.active ? `${s.name} disabled` : `${s.name} re-enabled`, false)}>
-                {s.active ? "Disable" : "Enable"}
-              </button>
-            )}
           </div>
         ))}
       </div>
