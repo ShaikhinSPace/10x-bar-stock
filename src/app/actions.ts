@@ -215,6 +215,77 @@ export async function setCount(itemId: number, loc: Loc, value: number): Promise
   });
 }
 
+/** Log a wasted, broken, or spilled bottle. */
+export async function logWaste(
+  itemId: number, qty: number, loc: Loc, reason: string
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(loc)) throw new Error("Unknown location");
+    const q = loc === "store" ? whole(qty, "Waste quantity") : partial(qty, "Waste quantity");
+    if (q <= 0) throw new Error("Quantity must be greater than zero");
+    const r = reason.trim() || "Spill / Breakage";
+
+    const rows = await sql`
+      with prev as (
+        select id, name, cat from items where id = ${itemId} and not archived
+      ), upd as (
+        update items set
+          store = store - case when ${loc}::text = 'store' then ${q} else 0 end,
+          patio = patio - case when ${loc}::text = 'patio' then ${q} else 0 end,
+          back  = back  - case when ${loc}::text = 'back'  then ${q} else 0 end
+        where id = ${itemId} and not archived and
+          (case ${loc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
+        returning id
+      )
+      insert into moves (type, item_id, item_name, cat, qty, loc, notes, user_id, user_name)
+      select 'waste', prev.id, prev.name, prev.cat, ${q}, ${loc}::text, ${r}, ${u.id}, ${u.name}
+      from prev join upd on upd.id = prev.id
+      returning id`;
+
+    if (!rows.length) throw new Error("Not enough stock in that location to record this waste.");
+    refresh();
+  });
+}
+
+/** Transfer stock directly between locations (e.g. Patio Bar <-> Back Bar). */
+export async function transferBar(
+  itemId: number, qty: number, fromLoc: Loc, toLoc: Loc
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(fromLoc) || !isLoc(toLoc)) throw new Error("Invalid location selection");
+    if (fromLoc === toLoc) throw new Error("Source and destination bars must be different");
+
+    const isWhole = fromLoc === "store" || toLoc === "store";
+    const q = isWhole ? whole(qty, "Transfer quantity") : partial(qty, "Transfer quantity");
+    if (q <= 0) throw new Error("Transfer quantity must be greater than zero");
+
+    const rows = await sql`
+      with prev as (
+        select id, name, cat from items where id = ${itemId} and not archived
+      ), upd as (
+        update items set
+          store = store - case when ${fromLoc}::text = 'store' then ${q} else 0 end
+                        + case when ${toLoc}::text   = 'store' then ${q} else 0 end,
+          patio = patio - case when ${fromLoc}::text = 'patio' then ${q} else 0 end
+                        + case when ${toLoc}::text   = 'patio' then ${q} else 0 end,
+          back  = back  - case when ${fromLoc}::text = 'back'  then ${q} else 0 end
+                        + case when ${toLoc}::text   = 'back'  then ${q} else 0 end
+        where id = ${itemId} and not archived and
+          (case ${fromLoc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
+        returning id
+      )
+      insert into moves (type, item_id, item_name, cat, qty, loc, to_loc, user_id, user_name)
+      select 'transfer', prev.id, prev.name, prev.cat, ${q}, ${fromLoc}::text, ${toLoc}::text, ${u.id}, ${u.name}
+      from prev join upd on upd.id = prev.id
+      returning id`;
+
+    if (!rows.length) throw new Error("Not enough stock in the source location to complete transfer.");
+    refresh();
+  });
+}
+
 /**
  * Reverse a move. Only the newest move for that item can be undone — reversing an
  * older one would silently clobber whatever was logged after it.
@@ -245,6 +316,23 @@ export async function undoMove(moveId: number): Promise<Result> {
         where id = ${m.item_id}`;
     } else if (m.type === "receive") {
       await sql`update items set store = store - ${m.qty} where id = ${m.item_id}`;
+    } else if (m.type === "waste") {
+      await sql`
+        update items set
+          store = store + case when ${m.loc}::text = 'store' then ${m.qty} else 0 end,
+          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end,
+          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
+        where id = ${m.item_id}`;
+    } else if (m.type === "transfer") {
+      await sql`
+        update items set
+          store = store + case when ${m.loc}::text = 'store' then ${m.qty} else 0 end
+                        - case when ${m.to_loc}::text = 'store' then ${m.qty} else 0 end,
+          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end
+                        - case when ${m.to_loc}::text = 'patio' then ${m.qty} else 0 end,
+          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
+                        - case when ${m.to_loc}::text = 'back'  then ${m.qty} else 0 end
+        where id = ${m.item_id}`;
     } else {
       await sql`
         update items set
@@ -257,6 +345,7 @@ export async function undoMove(moveId: number): Promise<Result> {
     refresh();
   });
 }
+
 
 /* ---------------- Manage (owner only) ---------------- */
 
@@ -285,6 +374,18 @@ export async function setReorderLevel(itemId: number, rl: number): Promise<Resul
     refresh();
   });
 }
+
+export async function batchSetReorderLevels(updates: { id: number; rl: number }[]): Promise<Result> {
+  return attempt(async () => {
+    await requireOwner();
+    if (!Array.isArray(updates) || !updates.length) throw new Error("No updates provided");
+    for (const u of updates) {
+      await sql`update items set rl = ${partial(u.rl, "Reorder level")} where id = ${u.id}`;
+    }
+    refresh();
+  });
+}
+
 
 /** Archive, never delete — the activity log references the row. */
 export async function archiveItem(itemId: number): Promise<Result> {

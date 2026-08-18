@@ -22,14 +22,24 @@ export type Item = {
 };
 
 export type Move = {
-  id: number; ts: string; type: "give" | "receive" | "count";
+  id: number; ts: string; type: "give" | "receive" | "count" | "waste" | "transfer";
   item_id: number; item_name: string; cat: Cat;
   qty: number | null; loc: Loc | null;
   from_val: number | null; to_val: number | null;
   user_name: string;
   /** Set on every line of a delivery, so one drop groups in the activity log. */
   batch: string | null; invoice: string | null; supplier: string | null;
+  notes: string | null; to_loc: Loc | null;
 };
+
+export const WASTAGE_REASONS = [
+  "Spill / Breakage",
+  "Expired / Spoiled",
+  "Staff Comp / Promo",
+  "Overpour",
+  "Other",
+] as const;
+export type WastageReason = (typeof WASTAGE_REASONS)[number];
 
 /** A booked delivery, rebuilt from the moves that share one batch id. */
 export type Delivery = {

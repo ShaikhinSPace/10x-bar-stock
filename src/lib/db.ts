@@ -34,17 +34,18 @@ export async function getItems(): Promise<Item[]> {
 
 export async function getMoves(limit = 500): Promise<Move[]> {
   const rows = await sql`
-    select id, ts, type, item_id, item_name, cat, qty, loc, from_val, to_val,
-           user_name, batch, invoice, supplier
+    select id, ts, type, item_id, item_name, cat, qty, loc, to_loc, from_val, to_val,
+           user_name, batch, invoice, supplier, notes
     from moves order by ts desc, id desc limit ${limit}`;
   return rows.map((r) => ({
     id: Number(r.id), ts: new Date(r.ts).toISOString(), type: r.type,
     item_id: r.item_id, item_name: r.item_name, cat: r.cat,
-    qty: num(r.qty), loc: r.loc, from_val: num(r.from_val), to_val: num(r.to_val),
+    qty: num(r.qty), loc: r.loc, to_loc: r.to_loc ?? null, from_val: num(r.from_val), to_val: num(r.to_val),
     user_name: r.user_name,
-    batch: r.batch, invoice: r.invoice, supplier: r.supplier,
+    batch: r.batch, invoice: r.invoice, supplier: r.supplier, notes: r.notes ?? null,
   }));
 }
+
 
 /**
  * Booked deliveries, rebuilt by grouping moves on their batch id — a delivery has

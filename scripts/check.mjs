@@ -56,7 +56,7 @@ try {
   assert.equal(await val(id, "store"), 7, "overdraw must not change store");
 
   // --- count at a bar keeps 2dp, and records the pre-update value ---
-  rows = await sql`
+  const countRows = await sql`
     with prev as (
       select id, name, cat,
              case 'patio'::text when 'store' then store when 'patio' then patio else back end as v
@@ -67,13 +67,48 @@ try {
     insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
     select 'count', prev.id, prev.name, prev.cat, 'patio', prev.v, 1.75, ${userId}, 'Check Runner'
     from prev join upd on upd.id = prev.id returning id, from_val, to_val`;
-  assert.equal(rows.length, 1, "count should log one move");
-  assert.equal(Number(rows[0].from_val), 3, "count must log the value from BEFORE the update");
+  assert.equal(countRows.length, 1, "count should log one move");
+  assert.equal(Number(countRows[0].from_val), 3, "count must log the value from BEFORE the update");
   assert.equal(await val(id, "patio"), 1.75, "bars must keep partial bottles");
 
+  // --- waste: subtracts from specified location and logs notes ---
+  rows = await sql`
+    with prev as (select id, name, cat from items where id = ${id} and not archived),
+    upd as (
+      update items set patio = patio - 0.5
+      where id = ${id} and not archived and patio >= 0.5 returning id
+    )
+    insert into moves (type, item_id, item_name, cat, qty, loc, notes, user_id, user_name)
+    select 'waste', prev.id, prev.name, prev.cat, 0.5, 'patio', 'Spill / Breakage', ${userId}, 'Check Runner'
+    from prev join upd on upd.id = prev.id returning id`;
+  assert.equal(rows.length, 1, "waste should log one move");
+  assert.equal(await val(id, "patio"), 1.25, "patio should drop to 1.25 after 0.5 waste");
+
+  // --- transfer: moves stock between patio and back bar ---
+  rows = await sql`
+    with prev as (select id, name, cat from items where id = ${id} and not archived),
+    upd as (
+      update items set patio = patio - 0.25, back = back + 0.25
+      where id = ${id} and not archived and patio >= 0.25 returning id
+    )
+    insert into moves (type, item_id, item_name, cat, qty, loc, to_loc, user_id, user_name)
+    select 'transfer', prev.id, prev.name, prev.cat, 0.25, 'patio', 'back', ${userId}, 'Check Runner'
+    from prev join upd on upd.id = prev.id returning id`;
+  assert.equal(rows.length, 1, "transfer should log one move");
+  assert.equal(await val(id, "patio"), 1.0, "patio should drop to 1.0");
+  assert.equal(await val(id, "back"), 0.25, "back should rise to 0.25");
+
+  // --- getMoves query check for to_loc and notes ---
+  const [latestMove] = await sql`
+    select id, type, loc, to_loc, notes from moves where item_id = ${id} order by id desc limit 1`;
+  assert.equal(latestMove.type, "transfer");
+  assert.equal(latestMove.to_loc, "back");
+
   // --- undo that count puts the bar back ---
-  await sql`update items set patio = ${rows[0].from_val} where id = ${id}`;
+  await sql`update items set patio = ${countRows[0].from_val}, back = 0 where id = ${id}`;
   assert.equal(await val(id, "patio"), 3, "undo should restore the previous count");
+
+
 
   // --- constraints: store stays whole and nothing goes negative ---
   await assert.rejects(

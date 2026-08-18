@@ -28,12 +28,12 @@ create table if not exists items (
 create table if not exists moves (
   id        bigserial primary key,
   ts        timestamptz not null default now(),
-  type      text not null check (type in ('give', 'receive', 'count')),
+  type      text not null check (type in ('give', 'receive', 'count', 'waste', 'transfer')),
   item_id   int not null references items(id),
   item_name text not null,
   cat       text not null,
-  qty       numeric(10,2),                                  -- give + receive
-  loc       text check (loc in ('store', 'patio', 'back')), -- give: destination; count: where
+  qty       numeric(10,2),                                  -- give + receive + waste + transfer
+  loc       text check (loc in ('store', 'patio', 'back')), -- give/waste: loc; count: loc; transfer: from_loc
   from_val  numeric(10,2),                                  -- count only
   to_val    numeric(10,2),                                  -- count only
   user_id   int references users(id),
@@ -45,6 +45,11 @@ create table if not exists moves (
 alter table moves add column if not exists batch    text;
 alter table moves add column if not exists invoice  text;
 alter table moves add column if not exists supplier text;
+alter table moves add column if not exists notes    text; -- waste reasons, comments
+alter table moves add column if not exists to_loc   text; -- transfer destination
+
+alter table moves drop constraint if exists moves_type_check;
+alter table moves add constraint moves_type_check check (type in ('give', 'receive', 'count', 'waste', 'transfer'));
 
 create index if not exists moves_ts_idx on moves (ts desc);
 create index if not exists moves_item_ts_idx on moves (item_id, ts desc);

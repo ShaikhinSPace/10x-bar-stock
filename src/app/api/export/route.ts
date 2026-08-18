@@ -80,7 +80,7 @@ async function deliveriesSheet(): Promise<Sheet> {
 
 async function activitySheet(): Promise<Sheet> {
   const rows = await sql`
-    select ts, type, item_name, cat, qty, loc, from_val, to_val, user_name, invoice, supplier, batch
+    select ts, type, item_name, cat, qty, loc, to_loc, from_val, to_val, user_name, invoice, supplier, batch, notes
     from moves order by ts desc`;
   return {
     name: "Activity",
@@ -88,27 +88,37 @@ async function activitySheet(): Promise<Sheet> {
       { header: "Date", width: 12 }, { header: "Time", width: 10 },
       { header: "Type", width: 12 }, { header: "Bottle", width: 30 },
       { header: "Category", width: 12 }, { header: "Qty / new count", width: 14 },
-      { header: "Was", width: 8 }, { header: "Location", width: 12 },
-      { header: "Entered by", width: 16 }, { header: "Invoice", width: 14 },
+      { header: "Was", width: 8 }, { header: "Location", width: 14 },
+      { header: "Entered by", width: 16 }, { header: "Invoice / Reason", width: 18 },
       { header: "Supplier", width: 20 },
     ],
     rows: rows.map((r) => {
       const d = dt(r.ts);
       const type = r.type === "give" ? "GIVE OUT"
         : r.type === "receive" ? (r.batch ? "DELIVERY" : "RECEIVE")
+        : r.type === "waste" ? "WASTAGE"
+        : r.type === "transfer" ? "TRANSFER"
         : "COUNT SET";
+
+      let locStr = r.loc ? LOC_LABEL[r.loc as Loc] ?? r.loc : "";
+      if (r.type === "transfer" && r.to_loc) {
+        const toStr = LOC_LABEL[r.to_loc as Loc] ?? r.to_loc;
+        locStr = `${locStr} → ${toStr}`;
+      }
+
       return [
         d.toLocaleDateString("en-GB"),
         d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }),
         type, r.item_name, cap(r.cat),
         r.type === "count" ? num(r.to_val) : num(r.qty),
         r.type === "count" ? num(r.from_val) : null,
-        r.loc ? LOC_LABEL[r.loc as Loc] : "",
-        r.user_name, r.invoice ?? "", r.supplier ?? "",
+        locStr,
+        r.user_name, r.notes ?? r.invoice ?? "", r.supplier ?? "",
       ];
     }),
   };
 }
+
 
 const BUILDERS: Record<Exclude<Kind, "all">, () => Promise<Sheet>> = {
   stock: stockSheet, reorder: reorderSheet,

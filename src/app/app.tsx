@@ -2,19 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  CATS, LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, needsReorder, totalOf,
+  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, needsReorder, totalOf,
   type Cat, type Delivery as Booked, type DeliveryLine, type Item, type Loc, type Move,
-  type SessionUser, type Staff,
+  type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, giveOut, logout, receive, receiveDelivery, setCount,
-  setReorderLevel, setUserActive, undoMove, type Result,
+  addItem, addUser, archiveItem, batchSetReorderLevels, giveOut, logWaste, logout, receive,
+  receiveDelivery, setCount, setReorderLevel, setUserActive, transferBar, undoMove, type Result,
 } from "./actions";
 
 type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
-type SheetAct = "give" | "receive" | "count";
+type SheetAct = "give" | "receive" | "transfer" | "waste" | "count";
 
 const DAY = 864e5;
+
 
 /* ============================ icons ============================ */
 
@@ -251,10 +252,13 @@ function Dashboard({
   const give7 = moves
     .filter((m) => m.type === "give" && +new Date(m.ts) >= since)
     .reduce((a, m) => a + (m.qty ?? 0), 0);
+  const waste7 = moves
+    .filter((m) => m.type === "waste" && +new Date(m.ts) >= since)
+    .reduce((a, m) => a + (m.qty ?? 0), 0);
 
   return (
     <>
-      <div className="ptitle">Dashboard <span className="sub">overview &amp; alerts</span></div>
+      <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
 
       <div className="dash">
         <section className="hero">
@@ -275,7 +279,7 @@ function Dashboard({
             <div className="v">{reorder.length}</div><div className="k">Need reorder</div>
           </div>
           <div className="tile">
-            <div className="v">{fmt(give7)}</div><div className="k">Given out · 7 days</div>
+            <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
           </div>
         </div>
 
@@ -286,12 +290,46 @@ function Dashboard({
         <div className="at-side">
           <BarCard bar="patio" items={items} moves={moves} now={now} />
           <BarCard bar="back" items={items} moves={moves} now={now} />
+          <WastageCard moves={moves} now={now} />
           <TopMoversCard moves={moves} now={now} />
         </div>
       </div>
     </>
   );
 }
+
+function WastageCard({ moves, now }: { moves: Move[]; now: number }) {
+  const since = now - 7 * DAY;
+  const wasteMoves = moves.filter((m) => m.type === "waste" && +new Date(m.ts) >= since);
+  const totalWaste = wasteMoves.reduce((a, m) => a + (m.qty ?? 0), 0);
+
+  const byReason = new Map<string, number>();
+  for (const m of wasteMoves) {
+    const r = m.notes || "Spill / Breakage";
+    byReason.set(r, (byReason.get(r) ?? 0) + (m.qty ?? 0));
+  }
+  const topReasons = [...byReason.entries()].sort((a, b) => b[1] - a[1]);
+
+  return (
+    <div className="card">
+      <div className="ch">
+        <h3>Wastage &amp; Spills · 7d</h3>
+        <span className={`badge${totalWaste > 0 ? " red" : ""}`}>{fmt(totalWaste)} bottles</span>
+      </div>
+      {!wasteMoves.length ? (
+        <div className="empty" style={{ padding: 16 }}>No wastage recorded this week.</div>
+      ) : (
+        topReasons.map(([r, q]) => (
+          <div className="brk" key={r} style={{ borderTopColor: "var(--line)" }}>
+            <span className="bnm">{r}</span>
+            <span className="bq" style={{ color: "var(--red)" }}>{fmt(q)}</span>
+          </div>
+        ))
+      )}
+    </div>
+  );
+}
+
 
 /**
  * Reorder is a table, not a list of cards: every row carries five facts and the
@@ -482,7 +520,50 @@ function TopMoversCard({ moves, now }: { moves: Move[]; now: number }) {
   );
 }
 
+function ScannerModal({
+
+  items, onClose, onPick,
+}: {
+  items: Item[]; onClose: () => void; onPick: (id: number) => void;
+}) {
+  const [q, setQ] = useState("");
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return items.slice(0, 8);
+    return items.filter((i) => i.name.toLowerCase().includes(needle) || cap(i.cat).toLowerCase().includes(needle)).slice(0, 10);
+  }, [items, q]);
+
+  return (
+    <div className="scan-modal" onClick={onClose}>
+      <div className="scan-box" onClick={(e) => e.stopPropagation()}>
+        <h3 style={{ margin: "0 0 4px", fontSize: 18 }}>Barcode &amp; Bottle Scanner</h3>
+        <div className="hint" style={{ margin: "0 0 12px" }}>Align barcode in camera viewport or type to filter</div>
+        <div className="scan-viewport">
+          <div className="scan-line" />
+          <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "var(--txt-3)", fontSize: 13 }}>
+            Ready to scan...
+          </div>
+        </div>
+        <div className="search">
+          <input placeholder="Scan or type bottle name..." value={q} autoFocus onChange={(e) => setQ(e.target.value)} />
+        </div>
+        <div style={{ maxHeight: 200, overflowY: "auto", margin: "10px 0" }}>
+          {matches.map((i) => (
+            <button key={i.id} onClick={() => { onPick(i.id); onClose(); }} className="dhit">
+              <span className="dhn">{i.name}</span>
+              <span className="dhc">{cap(i.cat)}</span>
+              <span className="dhadd">Select</span>
+            </button>
+          ))}
+        </div>
+        <button className="btn ghost" style={{ width: "100%", marginTop: 8 }} onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 /* ============================ stock ============================ */
+
 
 function Stock({
   items, moves, now, onPick,
@@ -491,6 +572,7 @@ function Stock({
   const [cat, setCat] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
+  const [showScan, setShowScan] = useState(false);
 
   const shown = useMemo(() => {
     let out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
@@ -527,7 +609,18 @@ function Stock({
 
   return (
     <>
-      <div className="ptitle">Stock <span className="sub">tap a bottle to log a move</span></div>
+      <div className="ptitle" style={{ justifyContent: "space-between" }}>
+        <span>Stock <span className="sub">tap a bottle to log a move</span></span>
+        <button className="scan-btn" onClick={() => setShowScan(true)}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2" strokeLinecap="round" />
+            <rect x="7" y="7" width="10" height="10" rx="1" />
+          </svg>
+          Scan Barcode
+        </button>
+      </div>
+
+      {showScan && <ScannerModal items={items} onClose={() => setShowScan(false)} onPick={onPick} />}
 
       <div className="locs">
         {LOCS.map((k) => (
@@ -539,6 +632,7 @@ function Stock({
           </button>
         ))}
       </div>
+
 
       <div className="stats">
         {stats.map((s) => (
@@ -607,12 +701,22 @@ function Sheet({
   const [bar, setBar] = useState<Loc | null>(null);
   const [giveQty, setGiveQty] = useState(1);
   const [recvQty, setRecvQty] = useState(1);
+
+  // Transfer state
+  const [transFrom, setTransFrom] = useState<Loc>("patio");
+  const [transTo, setTransTo] = useState<Loc>("back");
+  const [transQty, setTransQty] = useState(1);
+
+  // Waste state
+  const [wasteLoc, setWasteLoc] = useState<Loc>("patio");
+  const [wasteReason, setWasteReason] = useState<WastageReason>("Spill / Breakage");
+  const [wasteQty, setWasteQty] = useState(1);
+
+  // Count state
   const [countLoc, setCountLoc] = useState<Loc>("store");
   const [countVal, setCountVal] = useState(String(item.store));
 
   const presets = item.cat === "BEER" ? [1, 6, 12, 24] : [1, 2, 3, 6];
-  const qty = act === "give" ? giveQty : recvQty;
-  const setQty = act === "give" ? setGiveQty : setRecvQty;
   const isBar = countLoc !== "store";
   const step = isBar ? 0.25 : 1;
   const target = Number(countVal) || 0;
@@ -633,10 +737,10 @@ function Sheet({
         ))}
       </div>
 
-      <div className="actseg">
-        {(["give", "receive", "count"] as SheetAct[]).map((a) => (
+      <div className="actseg" style={{ overflowX: "auto" }}>
+        {(["give", "receive", "transfer", "waste", "count"] as SheetAct[]).map((a) => (
           <button key={a} className={act === a ? "on" : ""} onClick={() => setAct(a)}>
-            {a === "give" ? "Give out" : a === "receive" ? "Receive" : "Count"}
+            {a === "give" ? "Give" : a === "receive" ? "Receive" : a === "transfer" ? "Transfer" : a === "waste" ? "Wastage" : "Count"}
           </button>
         ))}
       </div>
@@ -653,7 +757,7 @@ function Sheet({
             ))}
           </div>
           <div className="lbl">How many bottles?</div>
-          <QtyPicker qty={qty} setQty={setQty} presets={presets} />
+          <QtyPicker qty={giveQty} setQty={setGiveQty} presets={presets} />
           <button className="commit" disabled={!bar || pending}
             onClick={() => run(() => giveOut(item.id, giveQty, bar!),
               `${giveQty} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
@@ -665,10 +769,70 @@ function Sheet({
       {act === "receive" && (
         <div>
           <div className="lbl">Add to store</div>
-          <QtyPicker qty={qty} setQty={setQty} presets={presets} />
+          <QtyPicker qty={recvQty} setQty={setRecvQty} presets={presets} />
           <button className="commit green" disabled={pending}
             onClick={() => run(() => receive(item.id, recvQty), `+${recvQty} × ${item.name} received`)}>
             Add to store
+          </button>
+        </div>
+      )}
+
+      {act === "transfer" && (
+        <div>
+          <div className="lbl">From</div>
+          <div className="pickrow">
+            {LOCS.map((k) => (
+              <button key={k} data-t={k} className={`pick${transFrom === k ? " sel" : ""}`}
+                onClick={() => {
+                  setTransFrom(k);
+                  if (transTo === k) setTransTo(k === "patio" ? "back" : "patio");
+                }}>
+                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+              </button>
+            ))}
+          </div>
+          <div className="lbl">To</div>
+          <div className="pickrow">
+            {LOCS.filter((k) => k !== transFrom).map((k) => (
+              <button key={k} data-t={k} className={`pick${transTo === k ? " sel" : ""}`}
+                onClick={() => setTransTo(k)}>
+                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+              </button>
+            ))}
+          </div>
+          <div className="lbl">Transfer quantity</div>
+          <QtyPicker qty={transQty} setQty={setTransQty} presets={presets} />
+          <button className="commit" disabled={pending}
+            onClick={() => run(() => transferBar(item.id, transQty, transFrom, transTo),
+              `Transferred ${transQty} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
+            Transfer stock
+          </button>
+        </div>
+      )}
+
+      {act === "waste" && (
+        <div>
+          <div className="lbl">Wasted from</div>
+          <div className="pickrow">
+            {LOCS.map((k) => (
+              <button key={k} data-t={k} className={`pick${wasteLoc === k ? " sel" : ""}`}
+                onClick={() => setWasteLoc(k)}>
+                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+              </button>
+            ))}
+          </div>
+          <div className="lbl">Reason</div>
+          <div className="fld" style={{ marginBottom: 16 }}>
+            <select value={wasteReason} onChange={(e) => setWasteReason(e.target.value as WastageReason)}>
+              {WASTAGE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            </select>
+          </div>
+          <div className="lbl">Quantity wasted</div>
+          <QtyPicker qty={wasteQty} setQty={setWasteQty} presets={presets} />
+          <button className="commit red" disabled={pending}
+            onClick={() => run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
+              `Recorded ${wasteQty} × ${item.name} waste (${wasteReason})`)}>
+            Record wastage
           </button>
         </div>
       )}
@@ -714,6 +878,7 @@ function Sheet({
     </div>
   );
 }
+
 
 function QtyPicker({
   qty, setQty, presets,
@@ -933,17 +1098,26 @@ function Activity({
   onUndo: (id: number) => void;
   onToast: (t: { msg: string; error?: boolean }) => void;
 }) {
+  const [filter, setFilter] = useState<string>("ALL");
+
+  const filtered = useMemo(() => {
+    if (filter === "ALL") return moves;
+    return moves.filter((m) => m.type.toUpperCase() === filter);
+  }, [moves, filter]);
+
   function copyCSV() {
     const rows: (string | number)[][] = [
       ["Date", "Time", "Type", "Item", "Category", "Qty/Value", "Location", "Entered By",
-       "Invoice", "Supplier"],
+       "Notes/Invoice", "Supplier"],
     ];
     for (const m of [...moves].reverse()) {
       const d = new Date(m.ts);
       const base = [d.toLocaleDateString(), timeStr(+d)];
-      const extra = [m.invoice ?? "", m.supplier ?? ""];
+      const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
       if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name, ...extra]);
+      else if (m.type === "waste") rows.push([...base, "WASTAGE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
+      else if (m.type === "transfer") rows.push([...base, "TRANSFER", m.item_name, m.cat, m.qty ?? 0, `${LOC_LABEL[m.loc!]} -> ${LOC_LABEL[m.to_loc!]}`, m.user_name, ...extra]);
       else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
     }
     const csv = rows
@@ -959,7 +1133,7 @@ function Activity({
   return (
     <>
       <div className="ptitle">Activity <span className="sub">every move, newest first</span></div>
-      <div className="toolbar">
+      <div className="toolbar" style={{ marginBottom: 12 }}>
         <button className="tbtn" onClick={copyCSV}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15V5a2 2 0 0 1 2-2h8" />
@@ -968,19 +1142,44 @@ function Activity({
         </button>
       </div>
 
-      {!moves.length ? (
-        <div className="empty">No activity yet.<br />Log your first bottle from the Stock tab.</div>
+      <div className="chips" style={{ marginBottom: 14 }}>
+        {["ALL", "GIVE", "RECEIVE", "TRANSFER", "WASTE", "COUNT"].map((f) => (
+          <button key={f} className={`chip${filter === f ? " on" : ""}`} onClick={() => setFilter(f)}>
+            {f === "ALL" ? "All moves" : cap(f)}
+          </button>
+        ))}
+      </div>
+
+      {!filtered.length ? (
+        <div className="empty">No activity matches filter.<br />Log a move from the Stock tab.</div>
       ) : (
-        moves.map((m, idx) => {
+        filtered.map((m, idx) => {
           const ts = +new Date(m.ts);
           const dk = dayKey(ts, now);
           const head = dk !== currentDay ? ((currentDay = dk), dk) : null;
           const canUndo = idx === 0 && (user.role === "owner" || m.user_name === user.name);
+
+          const icon = m.type === "give" ? "↗"
+            : m.type === "receive" ? "↓"
+            : m.type === "waste" ? "⚠"
+            : m.type === "transfer" ? "⇄"
+            : "✎";
+
+          const tagClass = m.type === "receive" && m.batch ? "batch"
+            : m.type === "waste" ? "waste"
+            : m.type === "transfer" ? "transfer"
+            : m.loc ?? "store";
+
+          const tagLabel = m.type === "receive" ? (m.batch ? "Delivery" : "Received")
+            : m.type === "waste" ? `Wasted (${LOC_SHORT[m.loc!]})`
+            : m.type === "transfer" ? `${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
+            : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`;
+
           return (
             <div key={m.id}>
               {head && <div className="day">{head}</div>}
               <div className={`ev ${m.type}`}>
-                <div className="ic">{m.type === "give" ? "↗" : m.type === "receive" ? "↓" : "✎"}</div>
+                <div className="ic">{icon}</div>
                 <div className="m">
                   <div className="t">
                     {m.type === "count"
@@ -990,15 +1189,12 @@ function Activity({
                   <div className="s">
                     {m.type === "count" ? `Was ${fmt(m.from_val ?? 0)} · ` : ""}
                     {cap(m.cat)} · {m.user_name}
+                    {m.notes ? ` · ${m.notes}` : ""}
                     {m.invoice ? ` · inv ${m.invoice}` : ""}
                     {m.supplier ? ` · ${m.supplier}` : ""}
                   </div>
                 </div>
-                <span className={`tag ${m.type === "receive" && m.batch ? "batch" : m.loc ?? "store"}`}>
-                  {m.type === "receive"
-                    ? (m.batch ? "Delivery" : "Received")
-                    : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`}
-                </span>
+                <span className={`tag ${tagClass}`}>{tagLabel}</span>
                 <div className="time">
                   {timeStr(ts)}
                   {canUndo && (
@@ -1016,6 +1212,7 @@ function Activity({
     </>
   );
 }
+
 
 /* ============================ manage (owner) ============================ */
 
@@ -1085,7 +1282,10 @@ function Manage({
       </div>
 
       <div className="card">
-        <div className="ch"><h3>All bottles</h3><span className="badge">{items.length}</span></div>
+        <div className="ch">
+          <h3>All bottles</h3>
+          <span className="badge">{items.length}</span>
+        </div>
         <div className="search" style={{ marginBottom: 12 }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
@@ -1123,6 +1323,7 @@ function Manage({
           </div>
         ))}
       </div>
+
 
       <div className="card">
         <div className="ch"><h3>Export to Excel</h3></div>
