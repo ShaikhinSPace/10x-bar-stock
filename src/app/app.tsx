@@ -929,12 +929,24 @@ function Sheet({
         ))}
       </div>
 
-      <div className="actseg" style={{ overflowX: "auto" }}>
-        {(["give", "receive", "transfer", "waste", "count"] as SheetAct[]).map((a) => (
+      {/* Give/Receive/Count are what staff do dozens of times a shift, so they get the
+          primary tab strip. Transfer and Wastage are rarer and, for wastage, destructive —
+          demoted to smaller secondary buttons below rather than competing for equal space
+          in what used to be a 5-wide, horizontally-scrolling strip. */}
+      <div className="actseg">
+        {(["give", "receive", "count"] as SheetAct[]).map((a) => (
           <button key={a} className={act === a ? "on" : ""} onClick={() => setAct(a)}>
-            {a === "give" ? "Give" : a === "receive" ? "Receive" : a === "transfer" ? "Transfer" : a === "waste" ? "Wastage" : "Count"}
+            {a === "give" ? "Give" : a === "receive" ? "Receive" : "Count"}
           </button>
         ))}
+      </div>
+      <div className="actmore">
+        <button className={`actmore-btn${act === "transfer" ? " on" : ""}`} onClick={() => setAct("transfer")}>
+          Transfer stock
+        </button>
+        <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
+          Record wastage
+        </button>
       </div>
 
       {act === "give" && (
@@ -1022,8 +1034,13 @@ function Sheet({
           <div className="lbl">Quantity wasted</div>
           <QtyPicker qty={wasteQty} setQty={setWasteQty} presets={presets} />
           <button className="commit red" disabled={pending}
-            onClick={() => run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
-              `Recorded ${fmtQty(item.cat, wasteQty)} × ${item.name} waste (${wasteReason})`)}>
+            onClick={() => {
+              if (confirm(`Record ${fmtQty(item.cat, wasteQty)} × ${item.name} as wasted from `
+                + `${LOC_SHORT[wasteLoc]} (${wasteReason})?`)) {
+                run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
+                  `Recorded ${fmtQty(item.cat, wasteQty)} × ${item.name} waste (${wasteReason})`);
+              }
+            }}>
             Record wastage
           </button>
         </div>

@@ -791,6 +791,20 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   box-shadow: 0 2px 8px rgba(76, 148, 255, 0.3);
 }
 
+/* Transfer / Wastage: deliberately smaller and quieter than .actseg so the two
+   rare (and for wastage, destructive) actions don't compete visually with
+   Give/Receive/Count. */
+.actmore { display: flex; gap: 8px; margin: -8px 0 18px; }
+.actmore-btn {
+  flex: 1; padding: 9px 6px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--txt-3); font-size: 12.5px; font-weight: 600; text-align: center;
+  transition: all 0.15s ease;
+}
+.actmore-btn:hover { color: var(--txt-2); border-color: var(--line-2); }
+.actmore-btn.on { color: var(--txt); border-color: var(--line-2); background: var(--surface-3); }
+.actmore-btn.on.danger { color: var(--red); border-color: var(--red); background: var(--red-glow); }
+
 .lbl {
   font-size: 11px; font-weight: 600; color: var(--txt-3);
   letter-spacing: 0.06em; text-transform: uppercase; margin: 0 0 10px;
