@@ -91,6 +91,26 @@ const LOC_COLOR: Record<Loc, string> = {
   store: "var(--store)", patio: "var(--patio)", back: "var(--back)",
 };
 
+/**
+ * Store-by-category pie: a real data encoding, not a grouping dot, so it gets
+ * its own palette rather than reusing CAT_COLOR's muted values (those read
+ * fine as small dots but wash out as large fills on the dark surface).
+ * Fixed to CAT_ORDER — every category keeps the same slice color regardless
+ * of whether it makes the pie's top-5-by-volume cutoff that day, so a
+ * category's identity never repaints just because stock levels shifted.
+ * Alternating lightness (0.59/0.67 OKLCH) between adjacent categories in
+ * fixed hue order clears an 8+ OKLab pairwise-distance target across all 9 —
+ * worst case (Whiskey/Other) checked at 10.3. "Rest" (the folded tail,
+ * >5 categories with stock) gets a deliberately neutral gray with no hue to
+ * collide with any real category on.
+ */
+const PIE_COLOR: Record<Cat, string> = {
+  WHISKEY: "#C75157", VODKA: "#D67B19", TEQUILA: "#8F7E03", GIN: "#5FAB4D",
+  RUM: "#069180", BEER: "#00A6C9", WINE: "#457BD5", MIXER: "#A47DE3",
+  OTHER: "#B55499",
+};
+const PIE_REST_COLOR = "#717171";
+
 /* ============================ helpers ============================ */
 
 const catRank = (c: string) => (CATS.indexOf(c as Cat) < 0 ? 99 : CATS.indexOf(c as Cat));
@@ -407,25 +427,135 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
   );
 }
 
+/** cx/cy at the arc's own radius, 0 = 12 o'clock, clockwise. */
+function arcPoint(cx: number, cy: number, r: number, angle: number): [number, number] {
+  return [cx + r * Math.sin(angle), cy - r * Math.cos(angle)];
+}
+function wedgePath(cx: number, cy: number, r: number, start: number, end: number): string {
+  if (end - start >= Math.PI * 2 - 1e-6) {
+    // A single 100% category: an explicit full-circle path (M..A..A..Z),
+    // since a 360° start=end arc collapses to nothing.
+    const [mx, my] = arcPoint(cx, cy, r, start);
+    const [hx, hy] = arcPoint(cx, cy, r, start + Math.PI);
+    return `M ${mx} ${my} A ${r} ${r} 0 1 1 ${hx} ${hy} A ${r} ${r} 0 1 1 ${mx} ${my} Z`;
+  }
+  const [x1, y1] = arcPoint(cx, cy, r, start);
+  const [x2, y2] = arcPoint(cx, cy, r, end);
+  const largeArc = end - start > Math.PI ? 1 : 0;
+  return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
+}
+
+type PieSlice = { key: string; label: string; value: number; color: string; cat: Cat | null };
+
+/**
+ * Store by category, as a tappable/keyboard-navigable pie rather than a bar
+ * list. Only the top 5 categories by volume get their own wedge — past ~7
+ * tokens a categorical palette stops being reliably distinguishable (see the
+ * dataviz skill's own anti-pattern list), so the rest fold into one "Rest"
+ * wedge instead of forcing 9 slices into the same pie. Nothing is hidden:
+ * selecting Rest lists exactly what's inside it.
+ */
 function CategoryCard({ items }: { items: Item[] }) {
-  const data = CATS
+  const [selected, setSelected] = useState<string | null>(null);
+
+  const all = CATS
     .map((c) => ({ c, v: items.filter((i) => i.cat === c).reduce((a, i) => a + Math.max(0, i.store), 0) }))
     .filter((d) => d.v > 0)
     .sort((a, b) => b.v - a.v);
-  const max = Math.max(1, ...data.map((d) => d.v));
+
+  const top = all.slice(0, 5);
+  const rest = all.slice(5);
+  const restTotal = rest.reduce((a, d) => a + d.v, 0);
+  const total = all.reduce((a, d) => a + d.v, 0) || 1;
+
+  const slices: PieSlice[] = top.map((d) => ({
+    key: d.c, label: cap(d.c), value: d.v, color: PIE_COLOR[d.c], cat: d.c,
+  }));
+  if (restTotal > 0) {
+    slices.push({ key: "REST", label: "Rest", value: restTotal, color: PIE_REST_COLOR, cat: null });
+  }
+
+  const cx = 110, cy = 110, r = 82, explode = 9;
+  // A running cumulative angle without mutating a captured variable across
+  // iterations (React's purity check flags that during render) - reduce into
+  // a fresh array instead, threading the running total through the accumulator.
+  const wedges = slices.reduce<Array<PieSlice & {
+    start: number; end: number; pct: number; dx: number; dy: number;
+  }>>((acc, s) => {
+    const start = acc.length ? acc[acc.length - 1].end : 0;
+    const frac = s.value / total;
+    const end = start + frac * Math.PI * 2;
+    const mid = (start + end) / 2;
+    const [dx, dy] = arcPoint(0, 0, explode, mid);
+    acc.push({ ...s, start, end, pct: frac * 100, dx, dy });
+    return acc;
+  }, []);
+
+  const activeSlice = wedges.find((w) => w.key === selected) ?? null;
+  const anySelected = selected !== null;
+  const toggle = (key: string) => setSelected((s) => (s === key ? null : key));
 
   return (
     <div className="card at-cat">
       <div className="ch"><h3>Store by category</h3></div>
-      {data.map((d) => (
-        <div className="hbar" key={d.c}>
-          <span className="k">{cap(d.c)}</span>
-          <span className="track">
-            <span className="fill" style={{ width: `${Math.max(3, (d.v / max) * 100)}%` }} />
-          </span>
-          <span className="v">{fmtQty(d.c, d.v)}</span>
+
+      <div className="pie-wrap">
+        <svg viewBox="0 0 220 220" className="pie-svg" role="img" aria-label="Store by category">
+          {wedges.map((w) => {
+            const isOn = w.key === selected;
+            return (
+              <path
+                key={w.key}
+                d={wedgePath(cx, cy, r, w.start, w.end)}
+                fill={w.color}
+                className="pie-slice"
+                style={{
+                  transform: isOn ? `translate(${w.dx}px, ${w.dy}px)` : undefined,
+                  opacity: anySelected && !isOn ? 0.4 : 1,
+                }}
+                tabIndex={0}
+                role="button"
+                aria-pressed={isOn}
+                aria-label={`${w.label}: ${fmt(Math.round(w.pct))}% of store, `
+                  + (w.cat === "BEER" ? fmtQty(w.cat, w.value) : `${fmt(w.value)} bottles`)}
+                onClick={() => toggle(w.key)}
+                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(w.key); } }}
+              />
+            );
+          })}
+        </svg>
+
+        <div className="pie-caption">
+          {activeSlice ? (
+            <>
+              <div className="pc-name" style={{ color: activeSlice.color }}>{activeSlice.label}</div>
+              <div className="pc-val">
+                {activeSlice.cat ? fmtQty(activeSlice.cat, activeSlice.value) : fmt(activeSlice.value)}
+                <small> · {fmt(Math.round(activeSlice.pct))}%</small>
+              </div>
+              {activeSlice.key === "REST" && (
+                <div className="pc-rest">{rest.map((d) => cap(d.c)).join(" · ")}</div>
+              )}
+            </>
+          ) : (
+            <>
+              <div className="pc-name">Total in store</div>
+              <div className="pc-val">{fmt(total)}<small> bottles</small></div>
+            </>
+          )}
         </div>
-      ))}
+      </div>
+
+      <div className="pie-legend">
+        {wedges.map((w) => (
+          <button key={w.key} className={`pie-leg${w.key === selected ? " on" : ""}`}
+            onClick={() => toggle(w.key)}>
+            <i style={{ background: w.color }} />
+            <span className="pl-k">{w.label}</span>
+            <span className="pl-v">{w.cat ? fmtQty(w.cat, w.value) : fmt(w.value)}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
