@@ -215,11 +215,15 @@ export function App({
 
       <div className={`scrim${sheetItem ? " show" : ""}`} onClick={() => setSheetId(null)} />
       <div className={`sheet${sheetItem ? " show" : ""}`}>
-        {sheetItem && <Sheet key={sheetItem.id} item={sheetItem} pending={pending} run={run} />}
+        {sheetItem && (
+          <Sheet key={sheetItem.id} item={sheetItem} pending={pending} run={run}
+            onClose={() => setSheetId(null)} />
+        )}
       </div>
 
       {toast && (
-        <div className="toast show" style={toast.error ? { borderColor: "var(--red)" } : undefined}>
+        <div className="toast show" role="status" aria-live={toast.error ? "assertive" : "polite"}
+          style={toast.error ? { borderColor: "var(--red)" } : undefined}>
           <span className="tx">{toast.msg}</span>
           {toast.moveId !== undefined && (
             <button className="undo" onClick={() => {
@@ -273,12 +277,16 @@ function Dashboard({
         </section>
 
         <div className="tiles">
-          <div className={`tile${outOfStock ? " badstate" : ""}`}>
+          <button className={`tile${outOfStock ? " badstate" : ""}`}
+            onClick={() => document.getElementById("reorder-table")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
             <div className="v">{outOfStock}</div><div className="k">Out of stock</div>
-          </div>
-          <div className={`tile${reorder.length ? " warnstate" : ""}`}>
+          </button>
+          <button className={`tile${reorder.length ? " warnstate" : ""}`}
+            onClick={() => document.getElementById("reorder-table")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
             <div className="v">{reorder.length}</div><div className="k">Need reorder</div>
-          </div>
+          </button>
           <div className="tile">
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
           </div>
@@ -342,9 +350,15 @@ function WastageCard({ moves, now }: { moves: Move[]; now: number }) {
  * "On bars" is here because a zero storeroom reads very differently when there
  * are still three bottles out on the Patio.
  */
+type ReorderSortKey = "name" | "store" | "onBars" | "rl";
+
 function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => void }) {
+  const { sort, toggle } = useColumnSort<ReorderSortKey>();
+  const shown = sortRows(rows, sort, (i, key) =>
+    key === "name" ? i.name : key === "store" ? i.store : key === "onBars" ? i.patio + i.back : i.rl);
+
   return (
-    <div className="card at-reorder">
+    <div className="card at-reorder" id="reorder-table">
       <div className="ch">
         <h3>Reorder</h3>
         <span className={`badge${rows.length ? " red" : ""}`}>{rows.length}</span>
@@ -359,14 +373,14 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
             <thead>
               <tr>
                 <th>Status</th>
-                <th>Bottle</th>
-                <th className="num">In store</th>
-                <th className="num hide-sm">On bars</th>
-                <th className="num">Reorder at</th>
+                <SortTh label="Bottle" thKey="name" sort={sort} toggle={toggle} />
+                <SortTh label="In store" thKey="store" sort={sort} toggle={toggle} className="num" />
+                <SortTh label="On bars" thKey="onBars" sort={sort} toggle={toggle} className="num hide-sm" />
+                <SortTh label="Reorder at" thKey="rl" sort={sort} toggle={toggle} className="num" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((i) => {
+              {shown.map((i) => {
                 const isOut = i.store <= 0;
                 return (
                   <tr key={i.id} onClick={() => onPick(i.id)}>
@@ -682,7 +696,7 @@ function Stock({
         </svg>
         <input placeholder="Search a bottle…" value={q} autoComplete="off"
           onChange={(e) => setQ(e.target.value)} />
-        {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+        {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
       </div>
 
       <div className="chips">
@@ -743,6 +757,7 @@ function Stocktake({
   items: Item[]; loc: Loc; user: SessionUser; onClose: () => void; pending: boolean;
   run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
 }) {
+  useEscapeClose(onClose);
   const draftKey = `stocktake:${loc}:${user.id}`;
 
   // A stocktake takes many minutes; losing it to a tab switch is unacceptable, so the
@@ -829,7 +844,7 @@ function Stocktake({
           <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
         </svg>
         <input placeholder="Jump to a bottle…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+        {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
       </div>
 
       <div className="stk-list">
@@ -874,7 +889,9 @@ function Stocktake({
           {variances.length > 0 && <span className="vwarn"> · {variances.length} variance{variances.length === 1 ? "" : "s"}</span>}
         </div>
         <button className="commit" disabled={pending || !variances.length} onClick={submit}>
-          {variances.length ? `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}` : "No changes to save"}
+          {pending ? "Saving…"
+            : variances.length ? `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}`
+            : "No changes to save"}
         </button>
       </div>
     </div>
@@ -884,11 +901,13 @@ function Stocktake({
 /* ============================ item sheet ============================ */
 
 function Sheet({
-  item, pending, run,
+  item, pending, run, onClose,
 }: {
   item: Item; pending: boolean;
   run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  onClose: () => void;
 }) {
+  useEscapeClose(onClose);
   const [act, setAct] = useState<SheetAct>("give");
   const [bar, setBar] = useState<Loc | null>(null);
   const [giveQty, setGiveQty] = useState(1);
@@ -917,6 +936,7 @@ function Sheet({
   return (
     <div className="sheet-in">
       <div className="grab" />
+      <button className="sheet-close" aria-label="Close" onClick={onClose}>×</button>
       <div className="sname">{item.name}</div>
       <div className="scat">{cap(item.cat)}</div>
 
@@ -965,7 +985,7 @@ function Sheet({
           <button className="commit" disabled={!bar || pending}
             onClick={() => run(() => giveOut(item.id, giveQty, bar!),
               `${fmtQty(item.cat, giveQty)} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
-            Give out
+            {pending ? "Giving…" : "Give out"}
           </button>
         </div>
       )}
@@ -976,7 +996,7 @@ function Sheet({
           <QtyPicker qty={recvQty} setQty={setRecvQty} presets={presets} />
           <button className="commit green" disabled={pending}
             onClick={() => run(() => receive(item.id, recvQty), `+${fmtQty(item.cat, recvQty)} × ${item.name} received`)}>
-            Add to store
+            {pending ? "Adding…" : "Add to store"}
           </button>
         </div>
       )}
@@ -1009,7 +1029,7 @@ function Sheet({
           <button className="commit" disabled={pending}
             onClick={() => run(() => transferBar(item.id, transQty, transFrom, transTo),
               `Transferred ${fmtQty(item.cat, transQty)} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
-            Transfer stock
+            {pending ? "Transferring…" : "Transfer stock"}
           </button>
         </div>
       )}
@@ -1041,7 +1061,7 @@ function Sheet({
                   `Recorded ${fmtQty(item.cat, wasteQty)} × ${item.name} waste (${wasteReason})`);
               }
             }}>
-            Record wastage
+            {pending ? "Recording…" : "Record wastage"}
           </button>
         </div>
       )}
@@ -1059,12 +1079,12 @@ function Sheet({
           </div>
           <div className="lbl">Bottles counted</div>
           <div className="qsel">
-            <button className="step"
+            <button className="step" aria-label="Decrease count"
               onClick={() => setCountVal(String(Math.max(0, Math.round((target - step) * 100) / 100)))}>−</button>
             <input className="qnum" type="number" inputMode="decimal" min="0"
               step={isBar ? "0.05" : "1"} value={countVal}
               onChange={(e) => setCountVal(e.target.value)} />
-            <button className="step"
+            <button className="step" aria-label="Increase count"
               onClick={() => setCountVal(String(Math.round((target + step) * 100) / 100))}>+</button>
           </div>
           <div className="cnote">
@@ -1080,7 +1100,7 @@ function Sheet({
           <button className="commit amber" disabled={pending}
             onClick={() => run(() => setCount(item.id, countLoc, target),
               `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmtQty(item.cat, target)}`)}>
-            Set count
+            {pending ? "Saving…" : "Set count"}
           </button>
         </div>
       )}
@@ -1095,9 +1115,9 @@ function QtyPicker({
   return (
     <>
       <div className="qsel">
-        <button className="step" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
+        <button className="step" aria-label="Decrease quantity" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
         <div className="qnum">{qty}</div>
-        <button className="step" onClick={() => setQty(qty + 1)}>+</button>
+        <button className="step" aria-label="Increase quantity" onClick={() => setQty(qty + 1)}>+</button>
       </div>
       <div className="presets">
         {presets.map((p) => (
@@ -1187,7 +1207,7 @@ function Delivery({
           </svg>
           <input placeholder="Search a bottle to add…" value={q} autoComplete="off"
             onChange={(e) => setQ(e.target.value)} />
-          {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+          {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
         </div>
 
         {needle && (
@@ -1243,7 +1263,7 @@ function Delivery({
                 {!invoice.trim() && <div className="dwarn">Add the invoice number to book this</div>}
               </div>
               <button className="commit green" disabled={pending || !invoice.trim()} onClick={book}>
-                Book delivery
+                {pending ? "Booking…" : "Book delivery"}
               </button>
             </div>
           </>
@@ -1423,7 +1443,58 @@ function Activity({
 }
 
 
+/**
+ * Click-to-sort for the two big lists (the Dashboard reorder table, Manage's
+ * bottle list). `null` means "respect whatever order the caller already
+ * computed" — the reorder table's default is "most deficient first," which a
+ * click on a header should be able to override, not fight with on every render.
+ * A second click on the same key reverses it; a third clears back to default.
+ */
+type SortDir = 1 | -1;
+function useColumnSort<K extends string>() {
+  const [sort, setSort] = useState<{ key: K; dir: SortDir } | null>(null);
+  const toggle = (key: K) =>
+    setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
+  return { sort, toggle };
+}
+function sortRows<T, K extends string>(
+  rows: T[], sort: { key: K; dir: SortDir } | null, get: (row: T, key: K) => string | number
+): T[] {
+  if (!sort) return rows;
+  return [...rows].sort((a, b) => {
+    const av = get(a, sort.key), bv = get(b, sort.key);
+    const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    return cmp * sort.dir;
+  });
+}
+/** A sortable <th>: a real button inside it (not the cell itself) so it's a
+ * proper keyboard/screen-reader target, with aria-sort on the cell. */
+function SortTh<K extends string>({
+  label, thKey, sort, toggle, className,
+}: { label: string; thKey: K; sort: { key: K; dir: SortDir } | null; toggle: (k: K) => void; className?: string }) {
+  const active = sort?.key === thKey;
+  return (
+    <th className={className} aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : "none"}>
+      <button className="sort-th" onClick={() => toggle(thKey)}>
+        {label}
+        {active && <span className="sort-ind">{sort!.dir === 1 ? "▲" : "▼"}</span>}
+      </button>
+    </th>
+  );
+}
+
 /* ============================ manage (owner) ============================ */
+
+/** Escape closes whatever full-screen overlay is currently mounted — the item
+ * Sheet and Stocktake, both of which only exist in the tree while open, so
+ * there's no "active" flag to track (unlike the popovers below). */
+function useEscapeClose(onClose: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
 
 /** A small dismissable panel anchored to its trigger button — closes on an
  * outside click, Escape, or its own × — shared by the Add staff and Export
@@ -1445,6 +1516,8 @@ function usePopoverClose(active: boolean, onClose: () => void) {
   }, [active, onClose]);
   return ref;
 }
+
+type ManageSortKey = "name" | "cat" | "store" | "patio" | "back" | "rl";
 
 function Manage({
   items, staff, user, run, pending,
@@ -1468,11 +1541,17 @@ function Manage({
   const [exportOpen, setExportOpen] = useState(false);
   const exportRef = usePopoverClose(exportOpen, () => setExportOpen(false));
 
-  const shown = useMemo(() => {
+  const filtered = useMemo(() => {
     const out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
     const needle = mq.trim().toLowerCase();
     return needle ? out.filter((i) => i.name.toLowerCase().includes(needle)) : out;
   }, [items, mq]);
+
+  const { sort: mSort, toggle: mToggle } = useColumnSort<ManageSortKey>();
+  const shown = sortRows(filtered, mSort, (i, key) =>
+    key === "name" ? i.name : key === "cat" ? i.cat
+      : key === "store" ? i.store : key === "patio" ? i.patio
+      : key === "back" ? i.back : i.rl);
 
   return (
     <>
@@ -1480,7 +1559,11 @@ function Manage({
 
       <div className="card addcard">
         <div className="ch"><h3>Add a bottle</h3></div>
-        <div className="frm">
+        <form className="frm" onSubmit={(e) => {
+          e.preventDefault();
+          if (pending) return;
+          run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`, false);
+        }}>
           <div className="fld">
             <label>Name</label>
             <input value={name} onChange={(e) => setName(e.target.value)}
@@ -1504,16 +1587,18 @@ function Manage({
                 onChange={(e) => setRl(e.target.value)} />
             </div>
           </div>
-          <button className="btn" disabled={pending} onClick={() =>
-            run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`, false)
-          }>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-            </svg>
-            Add bottle
+          <button className="btn" type="submit" disabled={pending}>
+            {pending ? "Adding…" : (
+              <>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                </svg>
+                Add bottle
+              </>
+            )}
           </button>
           <div className="hint">Opening stock is the storeroom count — bars get theirs from a Count.</div>
-        </div>
+        </form>
       </div>
 
       <div className="card">
@@ -1530,7 +1615,12 @@ function Manage({
             {addStaffOpen && (
               <div className="popover">
                 <button className="popover-close" aria-label="Close" onClick={() => setAddStaffOpen(false)}>×</button>
-                <div className="frm">
+                <form className="frm" onSubmit={(e) => {
+                  e.preventDefault();
+                  if (pending) return;
+                  run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
+                  setUPass("");
+                }}>
                   <div className="frow">
                     <div className="fld">
                       <label>Name</label>
@@ -1556,16 +1646,13 @@ function Manage({
                       </select>
                     </div>
                   </div>
-                  <button className="btn" disabled={pending} onClick={() => {
-                    run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
-                    setUPass("");
-                  }}>
-                    Add person
+                  <button className="btn" type="submit" disabled={pending}>
+                    {pending ? "Adding…" : "Add person"}
                   </button>
                   <div className="hint">
                     Staff can give out, receive and count. Owners can also edit bottles and staff.
                   </div>
-                </div>
+                </form>
               </div>
             )}
           </div>
@@ -1646,6 +1733,16 @@ function Manage({
           </svg>
           <input placeholder="Search bottles…" value={mq} autoComplete="off"
             onChange={(e) => setMq(e.target.value)} />
+        </div>
+        <div className="chips" style={{ marginBottom: 12 }}>
+          {([
+            ["name", "Name"], ["cat", "Category"], ["store", "Store"],
+            ["patio", "Patio"], ["back", "Back"], ["rl", "Reorder"],
+          ] as const).map(([key, label]) => (
+            <button key={key} className={`chip${mSort?.key === key ? " on" : ""}`} onClick={() => mToggle(key)}>
+              {label}{mSort?.key === key && (mSort.dir === 1 ? " ▲" : " ▼")}
+            </button>
+          ))}
         </div>
         {!shown.length && <div className="empty" style={{ padding: 20 }}>No bottles match.</div>}
         {shown.map((i) => (
