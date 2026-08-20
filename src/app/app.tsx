@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, needsReorder, totalOf,
+  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, needsReorder, totalOf,
   type Cat, type Delivery as Booked, type DeliveryLine, type Item, type Loc, type Move,
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
@@ -379,9 +379,9 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
                       <div className="nm">{i.name}</div>
                       <div className="cat">{cap(i.cat)}</div>
                     </td>
-                    <td className="num short">{fmt(i.store)}</td>
-                    <td className="num hide-sm">{fmt(i.patio + i.back)}</td>
-                    <td className="num">{fmt(i.rl)}</td>
+                    <td className="num short">{fmtQty(i.cat, i.store)}</td>
+                    <td className="num hide-sm">{fmtQty(i.cat, i.patio + i.back)}</td>
+                    <td className="num">{fmtQty(i.cat, i.rl)}</td>
                   </tr>
                 );
               })}
@@ -409,7 +409,7 @@ function CategoryCard({ items }: { items: Item[] }) {
           <span className="track">
             <span className="fill" style={{ width: `${Math.max(3, (d.v / max) * 100)}%` }} />
           </span>
-          <span className="v">{fmt(d.v)}</span>
+          <span className="v">{fmtQty(d.c, d.v)}</span>
         </div>
       ))}
     </div>
@@ -469,10 +469,13 @@ function BarCard({
   const since = now - 7 * DAY;
   const evs = moves.filter((m) => m.type === "give" && m.loc === bar && +new Date(m.ts) >= since);
   const total = evs.reduce((a, m) => a + (m.qty ?? 0), 0);
-  const per = new Map<string, number>();
-  for (const m of evs) per.set(m.item_name, (per.get(m.item_name) ?? 0) + (m.qty ?? 0));
-  const top = [...per.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const max = top.length ? top[0][1] : 1;
+  const per = new Map<string, { qty: number; cat: Cat }>();
+  for (const m of evs) {
+    const prev = per.get(m.item_name);
+    per.set(m.item_name, { qty: (prev?.qty ?? 0) + (m.qty ?? 0), cat: m.cat });
+  }
+  const top = [...per.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 6);
+  const max = top.length ? top[0][1].qty : 1;
 
   return (
     <div className="card barcard">
@@ -483,14 +486,14 @@ function BarCard({
       </div>
       <div className="onhand"><b>{fmt(sumAt(items, bar))}</b> on hand now</div>
       {!top.length && <div className="onhand" style={{ margin: 0 }}>Nothing pulled this week.</div>}
-      {top.map(([nm, qy]) => (
+      {top.map(([nm, { qty: qy, cat }]) => (
         <div className="brk" key={nm}>
           <span className="bnm">{nm}</span>
           <span className="bar-track">
             <span className="bar-fill"
               style={{ width: `${Math.max(8, (qy / max) * 100)}%`, background: LOC_COLOR[bar] }} />
           </span>
-          <span className="bq">{fmt(qy)}</span>
+          <span className="bq">{fmtQty(cat, qy)}</span>
         </div>
       ))}
     </div>
@@ -499,26 +502,27 @@ function BarCard({
 
 function TopMoversCard({ moves, now }: { moves: Move[]; now: number }) {
   const since = now - 7 * DAY;
-  const per = new Map<string, number>();
+  const per = new Map<string, { qty: number; cat: Cat }>();
   for (const m of moves) {
     if (m.type !== "give" || +new Date(m.ts) < since) continue;
-    per.set(m.item_name, (per.get(m.item_name) ?? 0) + (m.qty ?? 0));
+    const prev = per.get(m.item_name);
+    per.set(m.item_name, { qty: (prev?.qty ?? 0) + (m.qty ?? 0), cat: m.cat });
   }
-  const top = [...per.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const max = top.length ? top[0][1] : 1;
+  const top = [...per.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 6);
+  const max = top.length ? top[0][1].qty : 1;
 
   return (
     <div className="card">
       <div className="ch"><h3>Top movers · 7d</h3></div>
       {!top.length && <div className="empty" style={{ padding: 18 }}>No give-outs yet this week.</div>}
-      {top.map(([nm, qy]) => (
+      {top.map(([nm, { qty: qy, cat }]) => (
         <div className="brk" key={nm} style={{ borderTopColor: "var(--line)" }}>
           <span className="bnm">{nm}</span>
           <span className="bar-track">
             <span className="bar-fill"
               style={{ width: `${Math.max(8, (qy / max) * 100)}%`, background: "var(--blue)" }} />
           </span>
-          <span className="bq">{fmt(qy)}</span>
+          <span className="bq">{fmtQty(cat, qy)}</span>
         </div>
       ))}
     </div>
@@ -705,14 +709,14 @@ function Stock({
               <div className="info">
                 <div className="nm">{i.name}</div>
                 <div className="dist">
-                  <span className="d-store">Store <b>{fmt(i.store)}</b></span>
-                  <span className="d-patio">Patio <b>{fmt(i.patio)}</b></span>
-                  <span className="d-back">Back <b>{fmt(i.back)}</b></span>
+                  <span className="d-store">Store <b>{fmtQty(i.cat, i.store)}</b></span>
+                  <span className="d-patio">Patio <b>{fmtQty(i.cat, i.patio)}</b></span>
+                  <span className="d-back">Back <b>{fmtQty(i.cat, i.back)}</b></span>
                 </div>
               </div>
               {loc === "store" && zero && <span className="pill out">OUT</span>}
               {loc === "store" && low && <span className="pill low">LOW</span>}
-              <div className="qty">{fmt(totalOf(i))}<small>total</small></div>
+              <div className="qty">{fmtQty(i.cat, totalOf(i))}<small>total</small></div>
             </button>
           );
         })}
@@ -847,7 +851,7 @@ function Stocktake({
                 <span className="nm">{i.name}</span>
                 <span className="ct">{cap(i.cat)}</span>
               </span>
-              <span className="s-e">{fmt(i[loc])}</span>
+              <span className="s-e">{fmtQty(i.cat, i[loc])}</span>
               <span className="s-a">
                 <input
                   data-count-input type="number" inputMode="decimal" min="0"
@@ -919,7 +923,7 @@ function Sheet({
       <div className="mini">
         {LOCS.map((k) => (
           <div className={`c ${k}`} key={k}>
-            <div className="v">{fmt(item[k])}</div>
+            <div className="v">{fmtQty(item.cat, item[k])}</div>
             <div className="k">{LOC_SHORT[k]}</div>
           </div>
         ))}
@@ -948,7 +952,7 @@ function Sheet({
           <QtyPicker qty={giveQty} setQty={setGiveQty} presets={presets} />
           <button className="commit" disabled={!bar || pending}
             onClick={() => run(() => giveOut(item.id, giveQty, bar!),
-              `${giveQty} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
+              `${fmtQty(item.cat, giveQty)} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
             Give out
           </button>
         </div>
@@ -959,7 +963,7 @@ function Sheet({
           <div className="lbl">Add to store</div>
           <QtyPicker qty={recvQty} setQty={setRecvQty} presets={presets} />
           <button className="commit green" disabled={pending}
-            onClick={() => run(() => receive(item.id, recvQty), `+${recvQty} × ${item.name} received`)}>
+            onClick={() => run(() => receive(item.id, recvQty), `+${fmtQty(item.cat, recvQty)} × ${item.name} received`)}>
             Add to store
           </button>
         </div>
@@ -992,7 +996,7 @@ function Sheet({
           <QtyPicker qty={transQty} setQty={setTransQty} presets={presets} />
           <button className="commit" disabled={pending}
             onClick={() => run(() => transferBar(item.id, transQty, transFrom, transTo),
-              `Transferred ${transQty} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
+              `Transferred ${fmtQty(item.cat, transQty)} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
             Transfer stock
           </button>
         </div>
@@ -1019,7 +1023,7 @@ function Sheet({
           <QtyPicker qty={wasteQty} setQty={setWasteQty} presets={presets} />
           <button className="commit red" disabled={pending}
             onClick={() => run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
-              `Recorded ${wasteQty} × ${item.name} waste (${wasteReason})`)}>
+              `Recorded ${fmtQty(item.cat, wasteQty)} × ${item.name} waste (${wasteReason})`)}>
             Record wastage
           </button>
         </div>
@@ -1048,8 +1052,8 @@ function Sheet({
           </div>
           <div className="cnote">
             {delta === 0
-              ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmt(item[countLoc])}`
-              : `${LOC_SHORT[countLoc]}: ${fmt(item[countLoc])} → ${fmt(target)} (${delta > 0 ? "+" : ""}${fmt(delta)})`}
+              ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmtQty(item.cat, item[countLoc])}`
+              : `${LOC_SHORT[countLoc]}: ${fmtQty(item.cat, item[countLoc])} → ${fmtQty(item.cat, target)} (${delta > 0 ? "+" : ""}${fmt(delta)})`}
           </div>
           <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
             {isBar
@@ -1058,7 +1062,7 @@ function Sheet({
           </div>
           <button className="commit amber" disabled={pending}
             onClick={() => run(() => setCount(item.id, countLoc, target),
-              `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmt(target)}`)}>
+              `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmtQty(item.cat, target)}`)}>
             Set count
           </button>
         </div>
@@ -1175,7 +1179,7 @@ function Delivery({
             {matches.map((i) => (
               <button key={i.id} className="dhit" onClick={() => add(i)}>
                 <span className="dhn">{i.name}</span>
-                <span className="dhc">{cap(i.cat)} · {fmt(i.store)} in store</span>
+                <span className="dhc">{cap(i.cat)} · {fmtQty(i.cat, i.store)} in store</span>
                 <span className="dhadd">{i.cat === "BEER" ? "+24" : "+1"}</span>
               </button>
             ))}
@@ -1203,7 +1207,7 @@ function Delivery({
                 <div className="dline" key={id}>
                   <div className="dl-nm">
                     <div className="t">{it.name}</div>
-                    <div className="s">{fmt(it.store)} in store → <b>{fmt(it.store + n)}</b></div>
+                    <div className="s">{fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store + n)}</b></div>
                   </div>
                   <div className="dl-qty">
                     <button onClick={() => setQty(id, n - step)} aria-label={`Less ${it.name}`}>−</button>
@@ -1261,7 +1265,7 @@ function Delivery({
                         <span className="n">{l.item}</span>
                         <span className="c">{cap(l.cat)}</span>
                       </span>
-                      <span className="itq">+{fmt(l.qty)}</span>
+                      <span className="itq">+{fmtQty(l.cat, l.qty)}</span>
                     </div>
                   ))}
                 </div>
@@ -1371,11 +1375,11 @@ function Activity({
                 <div className="m">
                   <div className="t">
                     {m.type === "count"
-                      ? `${m.item_name} → ${fmt(m.to_val ?? 0)}`
-                      : `${fmt(m.qty ?? 0)} × ${m.item_name}`}
+                      ? `${m.item_name} → ${fmtQty(m.cat, m.to_val ?? 0)}`
+                      : `${fmtQty(m.cat, m.qty ?? 0)} × ${m.item_name}`}
                   </div>
                   <div className="s">
-                    {m.type === "count" ? `Was ${fmt(m.from_val ?? 0)} · ` : ""}
+                    {m.type === "count" ? `Was ${fmtQty(m.cat, m.from_val ?? 0)} · ` : ""}
                     {cap(m.cat)} · {m.user_name}
                     {m.notes ? ` · ${m.notes}` : ""}
                     {m.invoice ? ` · inv ${m.invoice}` : ""}
@@ -1632,7 +1636,7 @@ function Manage({
             <div className="mn">
               <div className="t">{i.name}</div>
               <div className="s">
-                {cap(i.cat)} · store {fmt(i.store)} · patio {fmt(i.patio)} · back {fmt(i.back)}
+                {cap(i.cat)} · store {fmtQty(i.cat, i.store)} · patio {fmtQty(i.cat, i.patio)} · back {fmtQty(i.cat, i.back)}
               </div>
             </div>
             <div className="rl">
@@ -1640,7 +1644,7 @@ function Manage({
               <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
                 onBlur={(e) => {
                   const v = Number(e.target.value);
-                  if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmt(v)}`, false);
+                  if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`, false);
                 }} />
             </div>
             <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
