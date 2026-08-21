@@ -92,24 +92,20 @@ const LOC_COLOR: Record<Loc, string> = {
 };
 
 /**
- * Store-by-category pie: a real data encoding, not a grouping dot, so it gets
- * its own palette rather than reusing CAT_COLOR's muted values (those read
- * fine as small dots but wash out as large fills on the dark surface).
- * Fixed to CAT_ORDER — every category keeps the same slice color regardless
- * of whether it makes the pie's top-5-by-volume cutoff that day, so a
+ * Store-by-category bars: a real data encoding, not a grouping dot, so it
+ * gets its own palette rather than reusing CAT_COLOR's muted values (those
+ * read fine as small dots but wash out as large fills on the dark surface).
+ * Every category keeps the same bar color regardless of rank, so a
  * category's identity never repaints just because stock levels shifted.
  * Alternating lightness (0.59/0.67 OKLCH) between adjacent categories in
  * fixed hue order clears an 8+ OKLab pairwise-distance target across all 9 —
- * worst case (Whiskey/Other) checked at 10.3. "Rest" (the folded tail,
- * >5 categories with stock) gets a deliberately neutral gray with no hue to
- * collide with any real category on.
+ * worst case (Whiskey/Other) checked at 10.3.
  */
-const PIE_COLOR: Record<Cat, string> = {
+const CAT_BAR_COLOR: Record<Cat, string> = {
   WHISKEY: "#C75157", VODKA: "#D67B19", TEQUILA: "#8F7E03", GIN: "#5FAB4D",
   RUM: "#069180", BEER: "#00A6C9", WINE: "#457BD5", MIXER: "#A47DE3",
   OTHER: "#B55499",
 };
-const PIE_REST_COLOR = "#717171";
 
 /* ============================ helpers ============================ */
 
@@ -133,10 +129,10 @@ function dayKey(ts: number, now: number) {
   const yest = new Date(now); yest.setDate(yest.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return "Today";
   if (d.toDateString() === yest.toDateString()) return "Yesterday";
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 const timeStr = (ts: number) =>
-  new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
 /* ============================ shell ============================ */
 
@@ -283,20 +279,18 @@ function Dashboard({
 
   return (
     <>
-      <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
+      <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
 
       <div className="dash">
-        <section className="hero">
-          <div className="lbl">Total bottles</div>
-          <div className="fig">{fmt(grandTot)}</div>
-          <div className="split">
-            <span><i style={{ background: "var(--store)" }} />Store <b>{fmt(storeTot)}</b></span>
-            <span><i style={{ background: "var(--patio-mark)" }} />Patio <b>{fmt(patioTot)}</b></span>
-            <span><i style={{ background: "var(--back-mark)" }} />Back <b>{fmt(backTot)}</b></span>
-          </div>
-        </section>
-
         <div className="tiles">
+          <div className="tile">
+            <div className="v">{fmt(grandTot)}</div><div className="k">Total bottles</div>
+            <div className="sp">
+              <span>Store <b>{fmt(storeTot)}</b></span>
+              <span>Patio <b>{fmt(patioTot)}</b></span>
+              <span>Back <b>{fmt(backTot)}</b></span>
+            </div>
+          </div>
           <button className={`tile${outOfStock ? " badstate" : ""}`}
             onClick={() => document.getElementById("reorder-table")
               ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
@@ -315,6 +309,8 @@ function Dashboard({
           </div>
         </div>
 
+        <ReorderTable rows={reorder} onPick={onPick} />
+
         <CategoryCard items={items} />
         <TrendCard moves={moves} now={now} />
 
@@ -324,8 +320,6 @@ function Dashboard({
           <WastageCard moves={moves} now={now} />
           <TopMoversCard moves={moves} now={now} />
         </div>
-
-        <ReorderTable rows={reorder} onPick={onPick} />
       </div>
     </>
   );
@@ -427,133 +421,35 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
   );
 }
 
-/** cx/cy at the arc's own radius, 0 = 12 o'clock, clockwise. */
-function arcPoint(cx: number, cy: number, r: number, angle: number): [number, number] {
-  return [cx + r * Math.sin(angle), cy - r * Math.cos(angle)];
-}
-function wedgePath(cx: number, cy: number, r: number, start: number, end: number): string {
-  if (end - start >= Math.PI * 2 - 1e-6) {
-    // A single 100% category: an explicit full-circle path (M..A..A..Z),
-    // since a 360° start=end arc collapses to nothing.
-    const [mx, my] = arcPoint(cx, cy, r, start);
-    const [hx, hy] = arcPoint(cx, cy, r, start + Math.PI);
-    return `M ${mx} ${my} A ${r} ${r} 0 1 1 ${hx} ${hy} A ${r} ${r} 0 1 1 ${mx} ${my} Z`;
-  }
-  const [x1, y1] = arcPoint(cx, cy, r, start);
-  const [x2, y2] = arcPoint(cx, cy, r, end);
-  const largeArc = end - start > Math.PI ? 1 : 0;
-  return `M ${cx} ${cy} L ${x1} ${y1} A ${r} ${r} 0 ${largeArc} 1 ${x2} ${y2} Z`;
-}
-
-type PieSlice = { key: string; label: string; value: number; color: string; cat: Cat | null };
-
 /**
- * Store by category, as a tappable/keyboard-navigable pie rather than a bar
- * list. Only the top 5 categories by volume get their own wedge — past ~7
- * tokens a categorical palette stops being reliably distinguishable (see the
- * dataviz skill's own anti-pattern list), so the rest fold into one "Rest"
- * wedge instead of forcing 9 slices into the same pie. Nothing is hidden:
- * selecting Rest lists exactly what's inside it.
+ * Store by category, as a dense scannable bar list rather than a pie: every
+ * category with stock gets its own row (no folding into "Rest" - a list
+ * scales to nine rows fine, unlike a pie's wedge-legibility ceiling), sorted
+ * by volume so the biggest category reads first.
  */
 function CategoryCard({ items }: { items: Item[] }) {
-  const [selected, setSelected] = useState<string | null>(null);
-
-  const all = CATS
+  const rows = CATS
     .map((c) => ({ c, v: items.filter((i) => i.cat === c).reduce((a, i) => a + Math.max(0, i.store), 0) }))
     .filter((d) => d.v > 0)
     .sort((a, b) => b.v - a.v);
-
-  const top = all.slice(0, 5);
-  const rest = all.slice(5);
-  const restTotal = rest.reduce((a, d) => a + d.v, 0);
-  const total = all.reduce((a, d) => a + d.v, 0) || 1;
-
-  const slices: PieSlice[] = top.map((d) => ({
-    key: d.c, label: cap(d.c), value: d.v, color: PIE_COLOR[d.c], cat: d.c,
-  }));
-  if (restTotal > 0) {
-    slices.push({ key: "REST", label: "Rest", value: restTotal, color: PIE_REST_COLOR, cat: null });
-  }
-
-  const cx = 110, cy = 110, r = 82, explode = 9;
-  // A running cumulative angle without mutating a captured variable across
-  // iterations (React's purity check flags that during render) - reduce into
-  // a fresh array instead, threading the running total through the accumulator.
-  const wedges = slices.reduce<Array<PieSlice & {
-    start: number; end: number; pct: number; dx: number; dy: number;
-  }>>((acc, s) => {
-    const start = acc.length ? acc[acc.length - 1].end : 0;
-    const frac = s.value / total;
-    const end = start + frac * Math.PI * 2;
-    const mid = (start + end) / 2;
-    const [dx, dy] = arcPoint(0, 0, explode, mid);
-    acc.push({ ...s, start, end, pct: frac * 100, dx, dy });
-    return acc;
-  }, []);
-
-  const activeSlice = wedges.find((w) => w.key === selected) ?? null;
-  const anySelected = selected !== null;
-  const toggle = (key: string) => setSelected((s) => (s === key ? null : key));
+  const total = rows.reduce((a, d) => a + d.v, 0);
+  const max = Math.max(...rows.map((d) => d.v), 1);
 
   return (
     <div className="card at-cat">
-      <div className="ch"><h3>Store by category</h3></div>
-
-      <div className="pie-wrap">
-        <svg viewBox="0 0 220 220" className="pie-svg" role="img" aria-label="Store by category">
-          {wedges.map((w) => {
-            const isOn = w.key === selected;
-            return (
-              <path
-                key={w.key}
-                d={wedgePath(cx, cy, r, w.start, w.end)}
-                fill={w.color}
-                className="pie-slice"
-                style={{
-                  transform: isOn ? `translate(${w.dx}px, ${w.dy}px)` : undefined,
-                  opacity: anySelected && !isOn ? 0.4 : 1,
-                }}
-                tabIndex={0}
-                role="button"
-                aria-pressed={isOn}
-                aria-label={`${w.label}: ${fmt(Math.round(w.pct))}% of store, `
-                  + (w.cat === "BEER" ? fmtQty(w.cat, w.value) : `${fmt(w.value)} bottles`)}
-                onClick={() => toggle(w.key)}
-                onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(w.key); } }}
-              />
-            );
-          })}
-        </svg>
-
-        <div className="pie-caption">
-          {activeSlice ? (
-            <>
-              <div className="pc-name" style={{ color: activeSlice.color }}>{activeSlice.label}</div>
-              <div className="pc-val">
-                {activeSlice.cat ? fmtQty(activeSlice.cat, activeSlice.value) : fmt(activeSlice.value)}
-                <small> · {fmt(Math.round(activeSlice.pct))}%</small>
-              </div>
-              {activeSlice.key === "REST" && (
-                <div className="pc-rest">{rest.map((d) => cap(d.c)).join(" · ")}</div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="pc-name">Total in store</div>
-              <div className="pc-val">{fmt(total)}<small> bottles</small></div>
-            </>
-          )}
-        </div>
+      <div className="ch">
+        <h3>Store by category</h3>
+        <span className="badge">{fmt(total)} bottles</span>
       </div>
-
-      <div className="pie-legend">
-        {wedges.map((w) => (
-          <button key={w.key} className={`pie-leg${w.key === selected ? " on" : ""}`}
-            onClick={() => toggle(w.key)}>
-            <i style={{ background: w.color }} />
-            <span className="pl-k">{w.label}</span>
-            <span className="pl-v">{w.cat ? fmtQty(w.cat, w.value) : fmt(w.value)}</span>
-          </button>
+      <div className="catbars">
+        {rows.map((d) => (
+          <div className="catbar" key={d.c}>
+            <span className="cb-name">{cap(d.c)}</span>
+            <div className="cb-track">
+              <div className="cb-fill" style={{ width: `${(d.v / max) * 100}%`, background: CAT_BAR_COLOR[d.c] }} />
+            </div>
+            <span className="cb-val">{d.c === "BEER" ? fmtQty(d.c, d.v) : fmt(d.v)}</span>
+          </div>
         ))}
       </div>
     </div>
@@ -593,7 +489,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
                 )}
               </div>
               <span className="cl">
-                {x.d.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2)}
+                {x.d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)}
               </span>
             </div>
           );
@@ -790,7 +686,7 @@ function Stock({
       <div className="locs">
         {LOCS.map((k) => (
           <button key={k} className={`loc${loc === k ? " on" : ""}`}
-            onClick={() => { setLoc(k); setLowOnly(false); }}>
+            onClick={() => { setLoc(k); setLowOnly(k !== "store"); }}>
             {LOC_ICON[k]}
             <span className="nm">{LOC_SHORT[k]}</span>
             <span className="ct">{fmt(sumAt(items, k))}</span>
@@ -1415,7 +1311,7 @@ function Delivery({
               <summary>
                 <span className="ino">{d.invoice}</span>
                 <span className="inmeta">
-                  {new Date(d.ts).toLocaleDateString(undefined,
+                  {new Date(d.ts).toLocaleDateString("en-US",
                     { day: "numeric", month: "short", year: "numeric" })}
                   {d.supplier ? ` · ${d.supplier}` : ""}
                 </span>
@@ -1471,7 +1367,7 @@ function Activity({
     ];
     for (const m of [...moves].reverse()) {
       const d = new Date(m.ts);
-      const base = [d.toLocaleDateString(), timeStr(+d)];
+      const base = [d.toLocaleDateString("en-US"), timeStr(+d)];
       const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
       if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name, ...extra]);
