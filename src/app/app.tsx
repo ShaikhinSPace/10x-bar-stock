@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, needsReorder, totalOf,
+  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, needsReorder, totalOf,
   type Cat, type Delivery as Booked, type DeliveryLine, type Item, type Loc, type Move,
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
@@ -91,6 +91,22 @@ const LOC_COLOR: Record<Loc, string> = {
   store: "var(--store)", patio: "var(--patio)", back: "var(--back)",
 };
 
+/**
+ * Store-by-category bars: a real data encoding, not a grouping dot, so it
+ * gets its own palette rather than reusing CAT_COLOR's muted values (those
+ * read fine as small dots but wash out as large fills on the dark surface).
+ * Every category keeps the same bar color regardless of rank, so a
+ * category's identity never repaints just because stock levels shifted.
+ * Alternating lightness (0.59/0.67 OKLCH) between adjacent categories in
+ * fixed hue order clears an 8+ OKLab pairwise-distance target across all 9 —
+ * worst case (Whiskey/Other) checked at 10.3.
+ */
+const CAT_BAR_COLOR: Record<Cat, string> = {
+  WHISKEY: "#C75157", VODKA: "#D67B19", TEQUILA: "#8F7E03", GIN: "#5FAB4D",
+  RUM: "#069180", BEER: "#00A6C9", WINE: "#457BD5", MIXER: "#A47DE3",
+  OTHER: "#B55499",
+};
+
 /* ============================ helpers ============================ */
 
 const catRank = (c: string) => (CATS.indexOf(c as Cat) < 0 ? 99 : CATS.indexOf(c as Cat));
@@ -113,10 +129,10 @@ function dayKey(ts: number, now: number) {
   const yest = new Date(now); yest.setDate(yest.getDate() - 1);
   if (d.toDateString() === today.toDateString()) return "Today";
   if (d.toDateString() === yest.toDateString()) return "Yesterday";
-  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+  return d.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
 }
 const timeStr = (ts: number) =>
-  new Date(ts).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
 /* ============================ shell ============================ */
 
@@ -215,11 +231,15 @@ export function App({
 
       <div className={`scrim${sheetItem ? " show" : ""}`} onClick={() => setSheetId(null)} />
       <div className={`sheet${sheetItem ? " show" : ""}`}>
-        {sheetItem && <Sheet key={sheetItem.id} item={sheetItem} pending={pending} run={run} />}
+        {sheetItem && (
+          <Sheet key={sheetItem.id} item={sheetItem} pending={pending} run={run}
+            onClose={() => setSheetId(null)} />
+        )}
       </div>
 
       {toast && (
-        <div className="toast show" style={toast.error ? { borderColor: "var(--red)" } : undefined}>
+        <div className="toast show" role="status" aria-live={toast.error ? "assertive" : "polite"}
+          style={toast.error ? { borderColor: "var(--red)" } : undefined}>
           <span className="tx">{toast.msg}</span>
           {toast.moveId !== undefined && (
             <button className="undo" onClick={() => {
@@ -259,26 +279,28 @@ function Dashboard({
 
   return (
     <>
-      <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
+      <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
 
       <div className="dash">
-        <section className="hero">
-          <div className="lbl">Total bottles</div>
-          <div className="fig">{fmt(grandTot)}</div>
-          <div className="split">
-            <span><i style={{ background: "var(--store)" }} />Store <b>{fmt(storeTot)}</b></span>
-            <span><i style={{ background: "var(--patio-mark)" }} />Patio <b>{fmt(patioTot)}</b></span>
-            <span><i style={{ background: "var(--back-mark)" }} />Back <b>{fmt(backTot)}</b></span>
-          </div>
-        </section>
-
         <div className="tiles">
-          <div className={`tile${outOfStock ? " badstate" : ""}`}>
+          <div className="tile">
+            <div className="v">{fmt(grandTot)}</div><div className="k">Total bottles</div>
+            <div className="sp">
+              <span>Store <b>{fmt(storeTot)}</b></span>
+              <span>Patio <b>{fmt(patioTot)}</b></span>
+              <span>Back <b>{fmt(backTot)}</b></span>
+            </div>
+          </div>
+          <button className={`tile${outOfStock ? " badstate" : ""}`}
+            onClick={() => document.getElementById("reorder-table")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
             <div className="v">{outOfStock}</div><div className="k">Out of stock</div>
-          </div>
-          <div className={`tile${reorder.length ? " warnstate" : ""}`}>
+          </button>
+          <button className={`tile${reorder.length ? " warnstate" : ""}`}
+            onClick={() => document.getElementById("reorder-table")
+              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
             <div className="v">{reorder.length}</div><div className="k">Need reorder</div>
-          </div>
+          </button>
           <div className="tile">
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
           </div>
@@ -288,6 +310,7 @@ function Dashboard({
         </div>
 
         <ReorderTable rows={reorder} onPick={onPick} />
+
         <CategoryCard items={items} />
         <TrendCard moves={moves} now={now} />
 
@@ -341,9 +364,15 @@ function WastageCard({ moves, now }: { moves: Move[]; now: number }) {
  * "On bars" is here because a zero storeroom reads very differently when there
  * are still three bottles out on the Patio.
  */
+type ReorderSortKey = "name" | "store" | "onBars" | "rl";
+
 function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => void }) {
+  const { sort, toggle } = useColumnSort<ReorderSortKey>();
+  const shown = sortRows(rows, sort, (i, key) =>
+    key === "name" ? i.name : key === "store" ? i.store : key === "onBars" ? i.patio + i.back : i.rl);
+
   return (
-    <div className="card at-reorder">
+    <div className="card at-reorder" id="reorder-table">
       <div className="ch">
         <h3>Reorder</h3>
         <span className={`badge${rows.length ? " red" : ""}`}>{rows.length}</span>
@@ -358,14 +387,14 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
             <thead>
               <tr>
                 <th>Status</th>
-                <th>Bottle</th>
-                <th className="num">In store</th>
-                <th className="num hide-sm">On bars</th>
-                <th className="num">Reorder at</th>
+                <SortTh label="Bottle" thKey="name" sort={sort} toggle={toggle} />
+                <SortTh label="In store" thKey="store" sort={sort} toggle={toggle} className="num" />
+                <SortTh label="On bars" thKey="onBars" sort={sort} toggle={toggle} className="num hide-sm" />
+                <SortTh label="Reorder at" thKey="rl" sort={sort} toggle={toggle} className="num" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((i) => {
+              {shown.map((i) => {
                 const isOut = i.store <= 0;
                 return (
                   <tr key={i.id} onClick={() => onPick(i.id)}>
@@ -378,9 +407,9 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
                       <div className="nm">{i.name}</div>
                       <div className="cat">{cap(i.cat)}</div>
                     </td>
-                    <td className="num short">{fmt(i.store)}</td>
-                    <td className="num hide-sm">{fmt(i.patio + i.back)}</td>
-                    <td className="num">{fmt(i.rl)}</td>
+                    <td className="num short">{fmtQty(i.cat, i.store)}</td>
+                    <td className="num hide-sm">{fmtQty(i.cat, i.patio + i.back)}</td>
+                    <td className="num">{fmtQty(i.cat, i.rl)}</td>
                   </tr>
                 );
               })}
@@ -392,25 +421,37 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
   );
 }
 
+/**
+ * Store by category, as a dense scannable bar list rather than a pie: every
+ * category with stock gets its own row (no folding into "Rest" - a list
+ * scales to nine rows fine, unlike a pie's wedge-legibility ceiling), sorted
+ * by volume so the biggest category reads first.
+ */
 function CategoryCard({ items }: { items: Item[] }) {
-  const data = CATS
+  const rows = CATS
     .map((c) => ({ c, v: items.filter((i) => i.cat === c).reduce((a, i) => a + Math.max(0, i.store), 0) }))
     .filter((d) => d.v > 0)
     .sort((a, b) => b.v - a.v);
-  const max = Math.max(1, ...data.map((d) => d.v));
+  const total = rows.reduce((a, d) => a + d.v, 0);
+  const max = Math.max(...rows.map((d) => d.v), 1);
 
   return (
     <div className="card at-cat">
-      <div className="ch"><h3>Store by category</h3></div>
-      {data.map((d) => (
-        <div className="hbar" key={d.c}>
-          <span className="k">{cap(d.c)}</span>
-          <span className="track">
-            <span className="fill" style={{ width: `${Math.max(3, (d.v / max) * 100)}%` }} />
-          </span>
-          <span className="v">{fmt(d.v)}</span>
-        </div>
-      ))}
+      <div className="ch">
+        <h3>Store by category</h3>
+        <span className="badge">{fmt(total)} bottles</span>
+      </div>
+      <div className="catbars">
+        {rows.map((d) => (
+          <div className="catbar" key={d.c}>
+            <span className="cb-name">{cap(d.c)}</span>
+            <div className="cb-track">
+              <div className="cb-fill" style={{ width: `${(d.v / max) * 100}%`, background: CAT_BAR_COLOR[d.c] }} />
+            </div>
+            <span className="cb-val">{d.c === "BEER" ? fmtQty(d.c, d.v) : fmt(d.v)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -448,7 +489,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
                 )}
               </div>
               <span className="cl">
-                {x.d.toLocaleDateString(undefined, { weekday: "short" }).slice(0, 2)}
+                {x.d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)}
               </span>
             </div>
           );
@@ -468,10 +509,13 @@ function BarCard({
   const since = now - 7 * DAY;
   const evs = moves.filter((m) => m.type === "give" && m.loc === bar && +new Date(m.ts) >= since);
   const total = evs.reduce((a, m) => a + (m.qty ?? 0), 0);
-  const per = new Map<string, number>();
-  for (const m of evs) per.set(m.item_name, (per.get(m.item_name) ?? 0) + (m.qty ?? 0));
-  const top = [...per.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const max = top.length ? top[0][1] : 1;
+  const per = new Map<string, { qty: number; cat: Cat }>();
+  for (const m of evs) {
+    const prev = per.get(m.item_name);
+    per.set(m.item_name, { qty: (prev?.qty ?? 0) + (m.qty ?? 0), cat: m.cat });
+  }
+  const top = [...per.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 6);
+  const max = top.length ? top[0][1].qty : 1;
 
   return (
     <div className="card barcard">
@@ -482,14 +526,14 @@ function BarCard({
       </div>
       <div className="onhand"><b>{fmt(sumAt(items, bar))}</b> on hand now</div>
       {!top.length && <div className="onhand" style={{ margin: 0 }}>Nothing pulled this week.</div>}
-      {top.map(([nm, qy]) => (
+      {top.map(([nm, { qty: qy, cat }]) => (
         <div className="brk" key={nm}>
           <span className="bnm">{nm}</span>
           <span className="bar-track">
             <span className="bar-fill"
               style={{ width: `${Math.max(8, (qy / max) * 100)}%`, background: LOC_COLOR[bar] }} />
           </span>
-          <span className="bq">{fmt(qy)}</span>
+          <span className="bq">{fmtQty(cat, qy)}</span>
         </div>
       ))}
     </div>
@@ -498,26 +542,27 @@ function BarCard({
 
 function TopMoversCard({ moves, now }: { moves: Move[]; now: number }) {
   const since = now - 7 * DAY;
-  const per = new Map<string, number>();
+  const per = new Map<string, { qty: number; cat: Cat }>();
   for (const m of moves) {
     if (m.type !== "give" || +new Date(m.ts) < since) continue;
-    per.set(m.item_name, (per.get(m.item_name) ?? 0) + (m.qty ?? 0));
+    const prev = per.get(m.item_name);
+    per.set(m.item_name, { qty: (prev?.qty ?? 0) + (m.qty ?? 0), cat: m.cat });
   }
-  const top = [...per.entries()].sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const max = top.length ? top[0][1] : 1;
+  const top = [...per.entries()].sort((a, b) => b[1].qty - a[1].qty).slice(0, 6);
+  const max = top.length ? top[0][1].qty : 1;
 
   return (
     <div className="card">
       <div className="ch"><h3>Top movers · 7d</h3></div>
       {!top.length && <div className="empty" style={{ padding: 18 }}>No give-outs yet this week.</div>}
-      {top.map(([nm, qy]) => (
+      {top.map(([nm, { qty: qy, cat }]) => (
         <div className="brk" key={nm} style={{ borderTopColor: "var(--line)" }}>
           <span className="bnm">{nm}</span>
           <span className="bar-track">
             <span className="bar-fill"
               style={{ width: `${Math.max(8, (qy / max) * 100)}%`, background: "var(--blue)" }} />
           </span>
-          <span className="bq">{fmt(qy)}</span>
+          <span className="bq">{fmtQty(cat, qy)}</span>
         </div>
       ))}
     </div>
@@ -641,7 +686,7 @@ function Stock({
       <div className="locs">
         {LOCS.map((k) => (
           <button key={k} className={`loc${loc === k ? " on" : ""}`}
-            onClick={() => { setLoc(k); setLowOnly(false); }}>
+            onClick={() => { setLoc(k); setLowOnly(k !== "store"); }}>
             {LOC_ICON[k]}
             <span className="nm">{LOC_SHORT[k]}</span>
             <span className="ct">{fmt(sumAt(items, k))}</span>
@@ -677,7 +722,7 @@ function Stock({
         </svg>
         <input placeholder="Search a bottle…" value={q} autoComplete="off"
           onChange={(e) => setQ(e.target.value)} />
-        {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+        {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
       </div>
 
       <div className="chips">
@@ -704,14 +749,14 @@ function Stock({
               <div className="info">
                 <div className="nm">{i.name}</div>
                 <div className="dist">
-                  <span className="d-store">Store <b>{fmt(i.store)}</b></span>
-                  <span className="d-patio">Patio <b>{fmt(i.patio)}</b></span>
-                  <span className="d-back">Back <b>{fmt(i.back)}</b></span>
+                  <span className="d-store">Store <b>{fmtQty(i.cat, i.store)}</b></span>
+                  <span className="d-patio">Patio <b>{fmtQty(i.cat, i.patio)}</b></span>
+                  <span className="d-back">Back <b>{fmtQty(i.cat, i.back)}</b></span>
                 </div>
               </div>
               {loc === "store" && zero && <span className="pill out">OUT</span>}
               {loc === "store" && low && <span className="pill low">LOW</span>}
-              <div className="qty">{fmt(totalOf(i))}<small>total</small></div>
+              <div className="qty">{fmtQty(i.cat, totalOf(i))}<small>total</small></div>
             </button>
           );
         })}
@@ -738,6 +783,7 @@ function Stocktake({
   items: Item[]; loc: Loc; user: SessionUser; onClose: () => void; pending: boolean;
   run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
 }) {
+  useEscapeClose(onClose);
   const draftKey = `stocktake:${loc}:${user.id}`;
 
   // A stocktake takes many minutes; losing it to a tab switch is unacceptable, so the
@@ -824,7 +870,7 @@ function Stocktake({
           <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
         </svg>
         <input placeholder="Jump to a bottle…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+        {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
       </div>
 
       <div className="stk-list">
@@ -846,7 +892,7 @@ function Stocktake({
                 <span className="nm">{i.name}</span>
                 <span className="ct">{cap(i.cat)}</span>
               </span>
-              <span className="s-e">{fmt(i[loc])}</span>
+              <span className="s-e">{fmtQty(i.cat, i[loc])}</span>
               <span className="s-a">
                 <input
                   data-count-input type="number" inputMode="decimal" min="0"
@@ -869,7 +915,9 @@ function Stocktake({
           {variances.length > 0 && <span className="vwarn"> · {variances.length} variance{variances.length === 1 ? "" : "s"}</span>}
         </div>
         <button className="commit" disabled={pending || !variances.length} onClick={submit}>
-          {variances.length ? `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}` : "No changes to save"}
+          {pending ? "Saving…"
+            : variances.length ? `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}`
+            : "No changes to save"}
         </button>
       </div>
     </div>
@@ -879,11 +927,13 @@ function Stocktake({
 /* ============================ item sheet ============================ */
 
 function Sheet({
-  item, pending, run,
+  item, pending, run, onClose,
 }: {
   item: Item; pending: boolean;
   run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  onClose: () => void;
 }) {
+  useEscapeClose(onClose);
   const [act, setAct] = useState<SheetAct>("give");
   const [bar, setBar] = useState<Loc | null>(null);
   const [giveQty, setGiveQty] = useState(1);
@@ -912,24 +962,37 @@ function Sheet({
   return (
     <div className="sheet-in">
       <div className="grab" />
+      <button className="sheet-close" aria-label="Close" onClick={onClose}>×</button>
       <div className="sname">{item.name}</div>
       <div className="scat">{cap(item.cat)}</div>
 
       <div className="mini">
         {LOCS.map((k) => (
           <div className={`c ${k}`} key={k}>
-            <div className="v">{fmt(item[k])}</div>
+            <div className="v">{fmtQty(item.cat, item[k])}</div>
             <div className="k">{LOC_SHORT[k]}</div>
           </div>
         ))}
       </div>
 
-      <div className="actseg" style={{ overflowX: "auto" }}>
-        {(["give", "receive", "transfer", "waste", "count"] as SheetAct[]).map((a) => (
+      {/* Give/Receive/Count are what staff do dozens of times a shift, so they get the
+          primary tab strip. Transfer and Wastage are rarer and, for wastage, destructive —
+          demoted to smaller secondary buttons below rather than competing for equal space
+          in what used to be a 5-wide, horizontally-scrolling strip. */}
+      <div className="actseg">
+        {(["give", "receive", "count"] as SheetAct[]).map((a) => (
           <button key={a} className={act === a ? "on" : ""} onClick={() => setAct(a)}>
-            {a === "give" ? "Give" : a === "receive" ? "Receive" : a === "transfer" ? "Transfer" : a === "waste" ? "Wastage" : "Count"}
+            {a === "give" ? "Give" : a === "receive" ? "Receive" : "Count"}
           </button>
         ))}
+      </div>
+      <div className="actmore">
+        <button className={`actmore-btn${act === "transfer" ? " on" : ""}`} onClick={() => setAct("transfer")}>
+          Transfer stock
+        </button>
+        <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
+          Record wastage
+        </button>
       </div>
 
       {act === "give" && (
@@ -947,8 +1010,8 @@ function Sheet({
           <QtyPicker qty={giveQty} setQty={setGiveQty} presets={presets} />
           <button className="commit" disabled={!bar || pending}
             onClick={() => run(() => giveOut(item.id, giveQty, bar!),
-              `${giveQty} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
-            Give out
+              `${fmtQty(item.cat, giveQty)} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
+            {pending ? "Giving…" : "Give out"}
           </button>
         </div>
       )}
@@ -958,8 +1021,8 @@ function Sheet({
           <div className="lbl">Add to store</div>
           <QtyPicker qty={recvQty} setQty={setRecvQty} presets={presets} />
           <button className="commit green" disabled={pending}
-            onClick={() => run(() => receive(item.id, recvQty), `+${recvQty} × ${item.name} received`)}>
-            Add to store
+            onClick={() => run(() => receive(item.id, recvQty), `+${fmtQty(item.cat, recvQty)} × ${item.name} received`)}>
+            {pending ? "Adding…" : "Add to store"}
           </button>
         </div>
       )}
@@ -991,8 +1054,8 @@ function Sheet({
           <QtyPicker qty={transQty} setQty={setTransQty} presets={presets} />
           <button className="commit" disabled={pending}
             onClick={() => run(() => transferBar(item.id, transQty, transFrom, transTo),
-              `Transferred ${transQty} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
-            Transfer stock
+              `Transferred ${fmtQty(item.cat, transQty)} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
+            {pending ? "Transferring…" : "Transfer stock"}
           </button>
         </div>
       )}
@@ -1017,9 +1080,14 @@ function Sheet({
           <div className="lbl">Quantity wasted</div>
           <QtyPicker qty={wasteQty} setQty={setWasteQty} presets={presets} />
           <button className="commit red" disabled={pending}
-            onClick={() => run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
-              `Recorded ${wasteQty} × ${item.name} waste (${wasteReason})`)}>
-            Record wastage
+            onClick={() => {
+              if (confirm(`Record ${fmtQty(item.cat, wasteQty)} × ${item.name} as wasted from `
+                + `${LOC_SHORT[wasteLoc]} (${wasteReason})?`)) {
+                run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
+                  `Recorded ${fmtQty(item.cat, wasteQty)} × ${item.name} waste (${wasteReason})`);
+              }
+            }}>
+            {pending ? "Recording…" : "Record wastage"}
           </button>
         </div>
       )}
@@ -1037,18 +1105,18 @@ function Sheet({
           </div>
           <div className="lbl">Bottles counted</div>
           <div className="qsel">
-            <button className="step"
+            <button className="step" aria-label="Decrease count"
               onClick={() => setCountVal(String(Math.max(0, Math.round((target - step) * 100) / 100)))}>−</button>
             <input className="qnum" type="number" inputMode="decimal" min="0"
               step={isBar ? "0.05" : "1"} value={countVal}
               onChange={(e) => setCountVal(e.target.value)} />
-            <button className="step"
+            <button className="step" aria-label="Increase count"
               onClick={() => setCountVal(String(Math.round((target + step) * 100) / 100))}>+</button>
           </div>
           <div className="cnote">
             {delta === 0
-              ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmt(item[countLoc])}`
-              : `${LOC_SHORT[countLoc]}: ${fmt(item[countLoc])} → ${fmt(target)} (${delta > 0 ? "+" : ""}${fmt(delta)})`}
+              ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmtQty(item.cat, item[countLoc])}`
+              : `${LOC_SHORT[countLoc]}: ${fmtQty(item.cat, item[countLoc])} → ${fmtQty(item.cat, target)} (${delta > 0 ? "+" : ""}${fmt(delta)})`}
           </div>
           <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
             {isBar
@@ -1057,8 +1125,8 @@ function Sheet({
           </div>
           <button className="commit amber" disabled={pending}
             onClick={() => run(() => setCount(item.id, countLoc, target),
-              `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmt(target)}`)}>
-            Set count
+              `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmtQty(item.cat, target)}`)}>
+            {pending ? "Saving…" : "Set count"}
           </button>
         </div>
       )}
@@ -1073,9 +1141,9 @@ function QtyPicker({
   return (
     <>
       <div className="qsel">
-        <button className="step" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
+        <button className="step" aria-label="Decrease quantity" onClick={() => setQty(Math.max(1, qty - 1))}>−</button>
         <div className="qnum">{qty}</div>
-        <button className="step" onClick={() => setQty(qty + 1)}>+</button>
+        <button className="step" aria-label="Increase quantity" onClick={() => setQty(qty + 1)}>+</button>
       </div>
       <div className="presets">
         {presets.map((p) => (
@@ -1165,7 +1233,7 @@ function Delivery({
           </svg>
           <input placeholder="Search a bottle to add…" value={q} autoComplete="off"
             onChange={(e) => setQ(e.target.value)} />
-          {q && <button className="clr" onClick={() => setQ("")}>×</button>}
+          {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
         </div>
 
         {needle && (
@@ -1174,7 +1242,7 @@ function Delivery({
             {matches.map((i) => (
               <button key={i.id} className="dhit" onClick={() => add(i)}>
                 <span className="dhn">{i.name}</span>
-                <span className="dhc">{cap(i.cat)} · {fmt(i.store)} in store</span>
+                <span className="dhc">{cap(i.cat)} · {fmtQty(i.cat, i.store)} in store</span>
                 <span className="dhadd">{i.cat === "BEER" ? "+24" : "+1"}</span>
               </button>
             ))}
@@ -1202,7 +1270,7 @@ function Delivery({
                 <div className="dline" key={id}>
                   <div className="dl-nm">
                     <div className="t">{it.name}</div>
-                    <div className="s">{fmt(it.store)} in store → <b>{fmt(it.store + n)}</b></div>
+                    <div className="s">{fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store + n)}</b></div>
                   </div>
                   <div className="dl-qty">
                     <button onClick={() => setQty(id, n - step)} aria-label={`Less ${it.name}`}>−</button>
@@ -1221,7 +1289,7 @@ function Delivery({
                 {!invoice.trim() && <div className="dwarn">Add the invoice number to book this</div>}
               </div>
               <button className="commit green" disabled={pending || !invoice.trim()} onClick={book}>
-                Book delivery
+                {pending ? "Booking…" : "Book delivery"}
               </button>
             </div>
           </>
@@ -1243,7 +1311,7 @@ function Delivery({
               <summary>
                 <span className="ino">{d.invoice}</span>
                 <span className="inmeta">
-                  {new Date(d.ts).toLocaleDateString(undefined,
+                  {new Date(d.ts).toLocaleDateString("en-US",
                     { day: "numeric", month: "short", year: "numeric" })}
                   {d.supplier ? ` · ${d.supplier}` : ""}
                 </span>
@@ -1260,7 +1328,7 @@ function Delivery({
                         <span className="n">{l.item}</span>
                         <span className="c">{cap(l.cat)}</span>
                       </span>
-                      <span className="itq">+{fmt(l.qty)}</span>
+                      <span className="itq">+{fmtQty(l.cat, l.qty)}</span>
                     </div>
                   ))}
                 </div>
@@ -1299,7 +1367,7 @@ function Activity({
     ];
     for (const m of [...moves].reverse()) {
       const d = new Date(m.ts);
-      const base = [d.toLocaleDateString(), timeStr(+d)];
+      const base = [d.toLocaleDateString("en-US"), timeStr(+d)];
       const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
       if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name, ...extra]);
@@ -1370,11 +1438,11 @@ function Activity({
                 <div className="m">
                   <div className="t">
                     {m.type === "count"
-                      ? `${m.item_name} → ${fmt(m.to_val ?? 0)}`
-                      : `${fmt(m.qty ?? 0)} × ${m.item_name}`}
+                      ? `${m.item_name} → ${fmtQty(m.cat, m.to_val ?? 0)}`
+                      : `${fmtQty(m.cat, m.qty ?? 0)} × ${m.item_name}`}
                   </div>
                   <div className="s">
-                    {m.type === "count" ? `Was ${fmt(m.from_val ?? 0)} · ` : ""}
+                    {m.type === "count" ? `Was ${fmtQty(m.cat, m.from_val ?? 0)} · ` : ""}
                     {cap(m.cat)} · {m.user_name}
                     {m.notes ? ` · ${m.notes}` : ""}
                     {m.invoice ? ` · inv ${m.invoice}` : ""}
@@ -1401,7 +1469,81 @@ function Activity({
 }
 
 
+/**
+ * Click-to-sort for the two big lists (the Dashboard reorder table, Manage's
+ * bottle list). `null` means "respect whatever order the caller already
+ * computed" — the reorder table's default is "most deficient first," which a
+ * click on a header should be able to override, not fight with on every render.
+ * A second click on the same key reverses it; a third clears back to default.
+ */
+type SortDir = 1 | -1;
+function useColumnSort<K extends string>() {
+  const [sort, setSort] = useState<{ key: K; dir: SortDir } | null>(null);
+  const toggle = (key: K) =>
+    setSort((s) => (s?.key === key ? (s.dir === 1 ? { key, dir: -1 } : null) : { key, dir: 1 }));
+  return { sort, toggle };
+}
+function sortRows<T, K extends string>(
+  rows: T[], sort: { key: K; dir: SortDir } | null, get: (row: T, key: K) => string | number
+): T[] {
+  if (!sort) return rows;
+  return [...rows].sort((a, b) => {
+    const av = get(a, sort.key), bv = get(b, sort.key);
+    const cmp = typeof av === "string" ? av.localeCompare(bv as string) : (av as number) - (bv as number);
+    return cmp * sort.dir;
+  });
+}
+/** A sortable <th>: a real button inside it (not the cell itself) so it's a
+ * proper keyboard/screen-reader target, with aria-sort on the cell. */
+function SortTh<K extends string>({
+  label, thKey, sort, toggle, className,
+}: { label: string; thKey: K; sort: { key: K; dir: SortDir } | null; toggle: (k: K) => void; className?: string }) {
+  const active = sort?.key === thKey;
+  return (
+    <th className={className} aria-sort={active ? (sort!.dir === 1 ? "ascending" : "descending") : "none"}>
+      <button className="sort-th" onClick={() => toggle(thKey)}>
+        {label}
+        {active && <span className="sort-ind">{sort!.dir === 1 ? "▲" : "▼"}</span>}
+      </button>
+    </th>
+  );
+}
+
 /* ============================ manage (owner) ============================ */
+
+/** Escape closes whatever full-screen overlay is currently mounted — the item
+ * Sheet and Stocktake, both of which only exist in the tree while open, so
+ * there's no "active" flag to track (unlike the popovers below). */
+function useEscapeClose(onClose: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+}
+
+/** A small dismissable panel anchored to its trigger button — closes on an
+ * outside click, Escape, or its own × — shared by the Add staff and Export
+ * popovers below since both need identical dismiss behavior. */
+function usePopoverClose(active: boolean, onClose: () => void) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!active) return;
+    const onDoc = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [active, onClose]);
+  return ref;
+}
+
+type ManageSortKey = "name" | "cat" | "store" | "patio" | "back" | "rl";
 
 function Manage({
   items, staff, user, run, pending,
@@ -1420,11 +1562,22 @@ function Manage({
   const [uPass, setUPass] = useState("");
   const [uRole, setURole] = useState<"owner" | "staff">("staff");
 
-  const shown = useMemo(() => {
+  const [addStaffOpen, setAddStaffOpen] = useState(false);
+  const addStaffRef = usePopoverClose(addStaffOpen, () => setAddStaffOpen(false));
+  const [exportOpen, setExportOpen] = useState(false);
+  const exportRef = usePopoverClose(exportOpen, () => setExportOpen(false));
+
+  const filtered = useMemo(() => {
     const out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
     const needle = mq.trim().toLowerCase();
     return needle ? out.filter((i) => i.name.toLowerCase().includes(needle)) : out;
   }, [items, mq]);
+
+  const { sort: mSort, toggle: mToggle } = useColumnSort<ManageSortKey>();
+  const shown = sortRows(filtered, mSort, (i, key) =>
+    key === "name" ? i.name : key === "cat" ? i.cat
+      : key === "store" ? i.store : key === "patio" ? i.patio
+      : key === "back" ? i.back : i.rl);
 
   return (
     <>
@@ -1432,7 +1585,11 @@ function Manage({
 
       <div className="card addcard">
         <div className="ch"><h3>Add a bottle</h3></div>
-        <div className="frm">
+        <form className="frm" onSubmit={(e) => {
+          e.preventDefault();
+          if (pending) return;
+          run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`, false);
+        }}>
           <div className="fld">
             <label>Name</label>
             <input value={name} onChange={(e) => setName(e.target.value)}
@@ -1456,129 +1613,74 @@ function Manage({
                 onChange={(e) => setRl(e.target.value)} />
             </div>
           </div>
-          <button className="btn" disabled={pending} onClick={() =>
-            run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`, false)
-          }>
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
-              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
-            </svg>
-            Add bottle
+          <button className="btn" type="submit" disabled={pending}>
+            {pending ? "Adding…" : (
+              <>
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                  <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+                </svg>
+                Add bottle
+              </>
+            )}
           </button>
           <div className="hint">Opening stock is the storeroom count — bars get theirs from a Count.</div>
-        </div>
+        </form>
       </div>
 
       <div className="card">
         <div className="ch">
-          <h3>All bottles</h3>
-          <span className="badge">{items.length}</span>
-        </div>
-        <div className="search" style={{ marginBottom: 12 }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
-          </svg>
-          <input placeholder="Search bottles…" value={mq} autoComplete="off"
-            onChange={(e) => setMq(e.target.value)} />
-        </div>
-        {!shown.length && <div className="empty" style={{ padding: 20 }}>No bottles match.</div>}
-        {shown.map((i) => (
-          <div className="mrow" key={i.id}>
-            <div className="mn">
-              <div className="t">{i.name}</div>
-              <div className="s">
-                {cap(i.cat)} · store {fmt(i.store)} · patio {fmt(i.patio)} · back {fmt(i.back)}
-              </div>
-            </div>
-            <div className="rl">
-              <label>reorder</label>
-              <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmt(v)}`, false);
-                }} />
-            </div>
-            <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
-              if (confirm(`Remove "${i.name}" from the list? Its past activity stays in the log.`)) {
-                run(() => archiveItem(i.id), "Bottle removed", false);
-              }
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"
-                  strokeLinecap="round" strokeLinejoin="round" />
+          <h3>Staff</h3>
+          <span className="badge">{staff.length}</span>
+          <div className="popover-anchor mg-popover-trigger" ref={addStaffRef}>
+            <button className="btn sm" onClick={() => setAddStaffOpen((o) => !o)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+                <path d="M12 5v14M5 12h14" strokeLinecap="round" />
               </svg>
+              Add staff
             </button>
-          </div>
-        ))}
-      </div>
-
-
-      <div className="card">
-        <div className="ch"><h3>Export to Excel</h3></div>
-        <div className="xgrid">
-          {([
-            ["stock", "Stock list", "Every bottle, per location, with totals and status"],
-            ["reorder", "Reorder list", "Only what is at or below its reorder point"],
-            ["deliveries", "Deliveries", "One row per delivery line, with invoice and supplier"],
-            ["activity", "Full activity", "Every give-out, delivery and count ever logged"],
-            ["all", "Everything", "All four as separate sheets in one workbook"],
-          ] as const).map(([kind, title, blurb]) => (
-            <a className={`xcard${kind === "all" ? " xall" : ""}`} key={kind}
-               href={`/api/export?kind=${kind}`} download>
-              <span className="xi">
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
-                     stroke="currentColor" strokeWidth="2">
-                  <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                  <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
-                </svg>
-              </span>
-              <span className="xt">
-                <span className="n">{title}</span>
-                <span className="b">{blurb}</span>
-              </span>
-            </a>
-          ))}
-        </div>
-        <div className="hint">
-          Downloads a real .xlsx — open it straight in Excel or Numbers.
-        </div>
-      </div>
-
-      <div className="card addcard">
-        <div className="ch"><h3>Staff</h3><span className="badge">{staff.length}</span></div>
-        <div className="frm">
-          <div className="frow">
-            <div className="fld">
-              <label>Name</label>
-              <input value={uName} onChange={(e) => setUName(e.target.value)} autoComplete="off" />
-            </div>
-            <div className="fld">
-              <label>Username</label>
-              <input value={uUser} onChange={(e) => setUUser(e.target.value)}
-                autoCapitalize="none" autoComplete="off" />
-            </div>
-          </div>
-          <div className="frow">
-            <div className="fld">
-              <label>Password</label>
-              <input type="password" value={uPass} onChange={(e) => setUPass(e.target.value)}
-                autoComplete="new-password" />
-            </div>
-            <div className="fld">
-              <label>Role</label>
-              <select value={uRole} onChange={(e) => setURole(e.target.value as "owner" | "staff")}>
-                <option value="staff">Staff</option>
-                <option value="owner">Owner</option>
-              </select>
-            </div>
-          </div>
-          <button className="btn" disabled={pending} onClick={() => {
-            run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
-            setUPass("");
-          }}>
-            Add person
-          </button>
-          <div className="hint">
-            Staff can give out, receive and count. Owners can also edit bottles and staff.
+            {addStaffOpen && (
+              <div className="popover">
+                <button className="popover-close" aria-label="Close" onClick={() => setAddStaffOpen(false)}>×</button>
+                <form className="frm" onSubmit={(e) => {
+                  e.preventDefault();
+                  if (pending) return;
+                  run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
+                  setUPass("");
+                }}>
+                  <div className="frow">
+                    <div className="fld">
+                      <label>Name</label>
+                      <input value={uName} onChange={(e) => setUName(e.target.value)} autoComplete="off" />
+                    </div>
+                    <div className="fld">
+                      <label>Username</label>
+                      <input value={uUser} onChange={(e) => setUUser(e.target.value)}
+                        autoCapitalize="none" autoComplete="off" />
+                    </div>
+                  </div>
+                  <div className="frow">
+                    <div className="fld">
+                      <label>Password</label>
+                      <input type="password" value={uPass} onChange={(e) => setUPass(e.target.value)}
+                        autoComplete="new-password" />
+                    </div>
+                    <div className="fld">
+                      <label>Role</label>
+                      <select value={uRole} onChange={(e) => setURole(e.target.value as "owner" | "staff")}>
+                        <option value="staff">Staff</option>
+                        <option value="owner">Owner</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button className="btn" type="submit" disabled={pending}>
+                    {pending ? "Adding…" : "Add person"}
+                  </button>
+                  <div className="hint">
+                    Staff can give out, receive and count. Owners can also edit bottles and staff.
+                  </div>
+                </form>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1595,6 +1697,106 @@ function Manage({
                 {s.active ? "Disable" : "Enable"}
               </button>
             )}
+          </div>
+        ))}
+      </div>
+
+      <div className="card">
+        <div className="ch">
+          <h3>Export to Excel</h3>
+          <div className="popover-anchor mg-popover-trigger" ref={exportRef}>
+            <button className="btn sm" onClick={() => setExportOpen((o) => !o)}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
+              </svg>
+              Export
+            </button>
+            {exportOpen && (
+              <div className="popover popover-wide">
+                <button className="popover-close" aria-label="Close" onClick={() => setExportOpen(false)}>×</button>
+                <div className="xgrid">
+                  {([
+                    ["stock", "Stock list", "Every bottle, per location, with totals and status"],
+                    ["reorder", "Reorder list", "Only what is at or below its reorder point"],
+                    ["deliveries", "Deliveries", "One row per delivery line, with invoice and supplier"],
+                    ["activity", "Full activity", "Every give-out, delivery and count ever logged"],
+                    ["all", "Everything", "All four as separate sheets in one workbook"],
+                  ] as const).map(([kind, title, blurb]) => (
+                    <a className={`xcard${kind === "all" ? " xall" : ""}`} key={kind}
+                       href={`/api/export?kind=${kind}`} download>
+                      <span className="xi">
+                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
+                             stroke="currentColor" strokeWidth="2">
+                          <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+                          <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
+                        </svg>
+                      </span>
+                      <span className="xt">
+                        <span className="n">{title}</span>
+                        <span className="b">{blurb}</span>
+                      </span>
+                    </a>
+                  ))}
+                </div>
+                <div className="hint">
+                  Downloads a real .xlsx — open it straight in Excel or Numbers.
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="ch">
+          <h3>All bottles</h3>
+          <span className="badge">{items.length}</span>
+        </div>
+        <div className="search" style={{ marginBottom: 12 }}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
+          </svg>
+          <input placeholder="Search bottles…" value={mq} autoComplete="off"
+            onChange={(e) => setMq(e.target.value)} />
+        </div>
+        <div className="chips" style={{ marginBottom: 12 }}>
+          {([
+            ["name", "Name"], ["cat", "Category"], ["store", "Store"],
+            ["patio", "Patio"], ["back", "Back"], ["rl", "Reorder"],
+          ] as const).map(([key, label]) => (
+            <button key={key} className={`chip${mSort?.key === key ? " on" : ""}`} onClick={() => mToggle(key)}>
+              {label}{mSort?.key === key && (mSort.dir === 1 ? " ▲" : " ▼")}
+            </button>
+          ))}
+        </div>
+        {!shown.length && <div className="empty" style={{ padding: 20 }}>No bottles match.</div>}
+        {shown.map((i) => (
+          <div className="mrow" key={i.id}>
+            <div className="mn">
+              <div className="t">{i.name}</div>
+              <div className="s">
+                {cap(i.cat)} · store {fmtQty(i.cat, i.store)} · patio {fmtQty(i.cat, i.patio)} · back {fmtQty(i.cat, i.back)}
+              </div>
+            </div>
+            <div className="rl">
+              <label>reorder</label>
+              <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
+                onBlur={(e) => {
+                  const v = Number(e.target.value);
+                  if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`, false);
+                }} />
+            </div>
+            <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
+              if (confirm(`Remove "${i.name}" from the list? Its past activity stays in the log.`)) {
+                run(() => archiveItem(i.id), "Bottle removed", false);
+              }
+            }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
           </div>
         ))}
       </div>

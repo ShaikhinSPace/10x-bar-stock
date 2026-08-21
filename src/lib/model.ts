@@ -63,6 +63,27 @@ export type Staff = {
 export const fmt = (n: number) =>
   Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100);
 
+const CASE_SIZE = 24;
+
+/**
+ * Beer is bought and stocked by the case (24 bottles), so a raw bottle count
+ * like "192" is harder to read at a glance than "8 cases" — this is how the
+ * owner actually thinks about and orders it. Every other category stays in
+ * plain bottles, since a "case of whiskey" isn't a real unit here.
+ *
+ * Below one case, or for anything not a clean multiple, falls back to plain
+ * bottles (or "N cases + M") rather than inventing a fractional-case unit.
+ * Reserved for on-screen numbers only — CSV/Excel exports stay in raw bottle
+ * counts, since that's what real spreadsheet math needs.
+ */
+export function fmtQty(cat: Cat, n: number): string {
+  if (cat !== "BEER" || n < CASE_SIZE) return fmt(n);
+  const cases = Math.floor(n / CASE_SIZE);
+  const rem = Math.round((n - cases * CASE_SIZE) * 100) / 100;
+  const label = `${cases} case${cases === 1 ? "" : "s"}`;
+  return rem > 0 ? `${label} + ${fmt(rem)}` : label;
+}
+
 /** Everything this bottle has, across all three locations. */
 export const totalOf = (i: Item) => i.store + i.patio + i.back;
 
