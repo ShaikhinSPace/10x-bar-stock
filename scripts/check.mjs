@@ -121,7 +121,7 @@ try {
   );
   await assert.rejects(
     () => sql`insert into items (name, cat) values (${NAME + "_x"}, 'NOT_A_CAT')`,
-    /violates check constraint/, "category must be one of the nine"
+    /violates foreign key constraint/, "category must exist in the categories table"
   );
 
   // --- a delivery books every line in one atomic statement ---

@@ -11,17 +11,37 @@ create table if not exists users (
   created_at    timestamptz not null default now()
 );
 
+-- The fixed set of bottle categories - was a CHECK constraint inline on
+-- items.cat, now a real table so it's a foreign key instead of a whitelist
+-- baked into the column definition. Mirrors CATS in src/lib/model.ts, which
+-- stays the source of truth for display order, colors, and Beer's
+-- case-of-24 formatting - none of that is data-driven, just this list.
+create table if not exists categories (
+  id   serial primary key,
+  name text not null unique
+);
+insert into categories (name) values
+  ('WHISKEY'), ('VODKA'), ('TEQUILA'), ('GIN'), ('RUM'), ('BEER'), ('WINE'), ('MIXER'), ('OTHER')
+on conflict (name) do nothing;
+
 create table if not exists items (
   id       serial primary key,
   name     text not null unique,
-  cat      text not null check (cat in
-             ('WHISKEY','VODKA','TEQUILA','GIN','RUM','BEER','WINE','MIXER','OTHER')),
+  cat      text not null,
   store    numeric(10,2) not null default 0 check (store >= 0 and store = trunc(store)),
   patio    numeric(10,2) not null default 0 check (patio >= 0),
   back     numeric(10,2) not null default 0 check (back  >= 0),
   rl       numeric(10,2) not null default 2 check (rl >= 0),
   archived boolean not null default false
 );
+
+-- Existing databases created items with the old inline CHECK before
+-- categories existed - drop it and swap in the real foreign key. Named and
+-- dropped explicitly (like moves_type_check below) so this stays safe to
+-- re-run.
+alter table items drop constraint if exists items_cat_check;
+alter table items drop constraint if exists items_cat_fkey;
+alter table items add constraint items_cat_fkey foreign key (cat) references categories(name);
 
 -- item_name/cat are denormalised on purpose: the activity log has to stay readable
 -- after an item is archived or renamed.

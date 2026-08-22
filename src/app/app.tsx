@@ -939,15 +939,23 @@ function Sheet({
   const [giveQty, setGiveQty] = useState(1);
   const [recvQty, setRecvQty] = useState(1);
 
-  // Transfer state
+  // Transfer state. Quantity is text, not a number, for the same reason Count's is:
+  // bar-to-bar transfers are partial (0.25 steps, same as a bar count), so the field
+  // has to accept "0.75" while it's still being typed. Store is always whole bottles.
   const [transFrom, setTransFrom] = useState<Loc>("patio");
   const [transTo, setTransTo] = useState<Loc>("back");
-  const [transQty, setTransQty] = useState(1);
+  const [transQtyStr, setTransQtyStr] = useState("1");
+  const transQty = Number(transQtyStr) || 0;
+  const transBothBars = transFrom !== "store" && transTo !== "store";
+  const transStep = transBothBars ? 0.25 : 1;
 
-  // Waste state
+  // Waste state - same string/partial split as transfer: a bar can spill
+  // part of a bottle, the storeroom can't.
   const [wasteLoc, setWasteLoc] = useState<Loc>("patio");
   const [wasteReason, setWasteReason] = useState<WastageReason>("Spill / Breakage");
-  const [wasteQty, setWasteQty] = useState(1);
+  const [wasteQtyStr, setWasteQtyStr] = useState("1");
+  const wasteQty = Number(wasteQtyStr) || 0;
+  const wasteIsBar = wasteLoc !== "store";
 
   // Count state
   const [countLoc, setCountLoc] = useState<Loc>("store");
@@ -1036,6 +1044,7 @@ function Sheet({
                 onClick={() => {
                   setTransFrom(k);
                   if (transTo === k) setTransTo(k === "patio" ? "back" : "patio");
+                  setTransQtyStr("1");
                 }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
               </button>
@@ -1043,16 +1052,33 @@ function Sheet({
           </div>
           <div className="lbl">To</div>
           <div className="pickrow">
-            {LOCS.filter((k) => k !== transFrom).map((k) => (
+            {LOCS.map((k) => (
               <button key={k} data-t={k} className={`pick${transTo === k ? " sel" : ""}`}
-                onClick={() => setTransTo(k)}>
+                disabled={k === transFrom}
+                onClick={() => { setTransTo(k); setTransQtyStr("1"); }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
           <div className="lbl">Transfer quantity</div>
-          <QtyPicker qty={transQty} setQty={setTransQty} presets={presets} />
-          <button className="commit" disabled={pending}
+          {transBothBars ? (
+            <>
+              <div className="qsel">
+                <button className="step" aria-label="Decrease quantity"
+                  onClick={() => setTransQtyStr(String(Math.max(0, Math.round((transQty - transStep) * 100) / 100)))}>−</button>
+                <input className="qnum" type="number" inputMode="decimal" min="0" step="0.05"
+                  value={transQtyStr} onChange={(e) => setTransQtyStr(e.target.value)} />
+                <button className="step" aria-label="Increase quantity"
+                  onClick={() => setTransQtyStr(String(Math.round((transQty + transStep) * 100) / 100))}>+</button>
+              </div>
+              <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
+                Bars count part bottles — 0.5 is a half, 0.25 a quarter.
+              </div>
+            </>
+          ) : (
+            <QtyPicker qty={transQty} setQty={(n) => setTransQtyStr(String(n))} presets={presets} />
+          )}
+          <button className="commit" disabled={pending || transQty <= 0}
             onClick={() => run(() => transferBar(item.id, transQty, transFrom, transTo),
               `Transferred ${fmtQty(item.cat, transQty)} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
             {pending ? "Transferring…" : "Transfer stock"}
@@ -1066,7 +1092,7 @@ function Sheet({
           <div className="pickrow">
             {LOCS.map((k) => (
               <button key={k} data-t={k} className={`pick${wasteLoc === k ? " sel" : ""}`}
-                onClick={() => setWasteLoc(k)}>
+                onClick={() => { setWasteLoc(k); setWasteQtyStr("1"); }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
               </button>
             ))}
@@ -1078,8 +1104,24 @@ function Sheet({
             </select>
           </div>
           <div className="lbl">Quantity wasted</div>
-          <QtyPicker qty={wasteQty} setQty={setWasteQty} presets={presets} />
-          <button className="commit red" disabled={pending}
+          {wasteIsBar ? (
+            <>
+              <div className="qsel">
+                <button className="step" aria-label="Decrease quantity"
+                  onClick={() => setWasteQtyStr(String(Math.max(0, Math.round((wasteQty - 0.25) * 100) / 100)))}>−</button>
+                <input className="qnum" type="number" inputMode="decimal" min="0" step="0.05"
+                  value={wasteQtyStr} onChange={(e) => setWasteQtyStr(e.target.value)} />
+                <button className="step" aria-label="Increase quantity"
+                  onClick={() => setWasteQtyStr(String(Math.round((wasteQty + 0.25) * 100) / 100))}>+</button>
+              </div>
+              <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
+                Bars count part bottles — 0.5 is a half, 0.25 a quarter.
+              </div>
+            </>
+          ) : (
+            <QtyPicker qty={wasteQty} setQty={(n) => setWasteQtyStr(String(n))} presets={presets} />
+          )}
+          <button className="commit red" disabled={pending || wasteQty <= 0}
             onClick={() => {
               if (confirm(`Record ${fmtQty(item.cat, wasteQty)} × ${item.name} as wasted from `
                 + `${LOC_SHORT[wasteLoc]} (${wasteReason})?`)) {

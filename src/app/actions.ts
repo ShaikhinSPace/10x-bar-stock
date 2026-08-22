@@ -74,8 +74,8 @@ export async function giveOut(itemId: number, qty: number, to: Loc): Promise<Res
       ), upd as (
         update items set
           store = store - ${q},
-          patio = patio + case when ${to}::text = 'patio' then ${q} else 0 end,
-          back  = back  + case when ${to}::text = 'back'  then ${q} else 0 end
+          patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
+          back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end
         where id = ${itemId} and not archived and store >= ${q}
         returning id
       )
@@ -297,9 +297,9 @@ export async function logWaste(
         select id, name, cat from items where id = ${itemId} and not archived
       ), upd as (
         update items set
-          store = store - case when ${loc}::text = 'store' then ${q} else 0 end,
-          patio = patio - case when ${loc}::text = 'patio' then ${q} else 0 end,
-          back  = back  - case when ${loc}::text = 'back'  then ${q} else 0 end
+          store = store - case when ${loc}::text = 'store' then ${q}::numeric else 0 end,
+          patio = patio - case when ${loc}::text = 'patio' then ${q}::numeric else 0 end,
+          back  = back  - case when ${loc}::text = 'back'  then ${q}::numeric else 0 end
         where id = ${itemId} and not archived and
           (case ${loc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
         returning id
@@ -332,12 +332,12 @@ export async function transferBar(
         select id, name, cat from items where id = ${itemId} and not archived
       ), upd as (
         update items set
-          store = store - case when ${fromLoc}::text = 'store' then ${q} else 0 end
-                        + case when ${toLoc}::text   = 'store' then ${q} else 0 end,
-          patio = patio - case when ${fromLoc}::text = 'patio' then ${q} else 0 end
-                        + case when ${toLoc}::text   = 'patio' then ${q} else 0 end,
-          back  = back  - case when ${fromLoc}::text = 'back'  then ${q} else 0 end
-                        + case when ${toLoc}::text   = 'back'  then ${q} else 0 end
+          store = store - case when ${fromLoc}::text = 'store' then ${q}::numeric else 0 end
+                        + case when ${toLoc}::text   = 'store' then ${q}::numeric else 0 end,
+          patio = patio - case when ${fromLoc}::text = 'patio' then ${q}::numeric else 0 end
+                        + case when ${toLoc}::text   = 'patio' then ${q}::numeric else 0 end,
+          back  = back  - case when ${fromLoc}::text = 'back'  then ${q}::numeric else 0 end
+                        + case when ${toLoc}::text   = 'back'  then ${q}::numeric else 0 end
         where id = ${itemId} and not archived and
           (case ${fromLoc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
         returning id
@@ -377,27 +377,27 @@ export async function undoMove(moveId: number): Promise<Result> {
       await sql`
         update items set
           store = store + ${m.qty},
-          patio = patio - case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end,
-          back  = back  - case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
+          patio = patio - case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
+          back  = back  - case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
         where id = ${m.item_id}`;
     } else if (m.type === "receive") {
       await sql`update items set store = store - ${m.qty} where id = ${m.item_id}`;
     } else if (m.type === "waste") {
       await sql`
         update items set
-          store = store + case when ${m.loc}::text = 'store' then ${m.qty} else 0 end,
-          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end,
-          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
+          store = store + case when ${m.loc}::text = 'store' then ${m.qty}::numeric else 0 end,
+          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
+          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
         where id = ${m.item_id}`;
     } else if (m.type === "transfer") {
       await sql`
         update items set
-          store = store + case when ${m.loc}::text = 'store' then ${m.qty} else 0 end
-                        - case when ${m.to_loc}::text = 'store' then ${m.qty} else 0 end,
-          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty} else 0 end
-                        - case when ${m.to_loc}::text = 'patio' then ${m.qty} else 0 end,
-          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty} else 0 end
-                        - case when ${m.to_loc}::text = 'back'  then ${m.qty} else 0 end
+          store = store + case when ${m.loc}::text = 'store' then ${m.qty}::numeric else 0 end
+                        - case when ${m.to_loc}::text = 'store' then ${m.qty}::numeric else 0 end,
+          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end
+                        - case when ${m.to_loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
+          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
+                        - case when ${m.to_loc}::text = 'back'  then ${m.qty}::numeric else 0 end
         where id = ${m.item_id}`;
     } else {
       await sql`

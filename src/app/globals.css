@@ -817,6 +817,7 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   transition: all 0.2s ease;
 }
 @media (hover: hover) and (pointer: fine) { .pick:hover { color: var(--txt-2); border-color: var(--line-2); } }
+.pick:disabled { opacity: 0.35; pointer-events: none; }
 .pick .bd { width: 11px; height: 11px; border-radius: 50%; }
 .pick.sel[data-t="patio"] {
   border-color: var(--patio);
