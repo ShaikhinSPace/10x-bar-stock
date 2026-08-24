@@ -24,11 +24,12 @@ const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function getItems(): Promise<Item[]> {
   const rows = await sql`
-    select id, name, cat, store, patio, back, rl from items
+    select id, name, cat, store, patio, back, rl, ignore_reorder from items
     where not archived order by name`;
   return rows.map((r) => ({
     id: r.id, name: r.name, cat: r.cat,
     store: num(r.store)!, patio: num(r.patio)!, back: num(r.back)!, rl: num(r.rl)!,
+    ignore_reorder: r.ignore_reorder,
   }));
 }
 

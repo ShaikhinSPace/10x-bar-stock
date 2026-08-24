@@ -35,6 +35,13 @@ create table if not exists items (
   archived boolean not null default false
 );
 
+-- Not everything below its reorder point needs restocking (e.g. a discontinued
+-- flavor still being sold down) - an owner can silence just that one item's
+-- alert without touching its reorder level. (A whole category can already be
+-- silenced via NO_REORDER_ALERTS in src/lib/model.ts - this is the per-item
+-- equivalent of that.)
+alter table items add column if not exists ignore_reorder boolean not null default false;
+
 -- Existing databases created items with the old inline CHECK before
 -- categories existed - drop it and swap in the real foreign key. Named and
 -- dropped explicitly (like moves_type_check below) so this stays safe to

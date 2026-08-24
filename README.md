@@ -66,24 +66,49 @@ a single SQL statement, so it is all-or-nothing — stock and its log entries ap
 together or not at all. Duplicate lines for the same bottle are merged before
 booking.
 
-## Exporting to Excel
+## Reports
 
-Owners get an **Export to Excel** card on the Manage tab: stock list, reorder list,
-deliveries, full activity, or all four as separate sheets in one workbook. Each
-downloads a real `.xlsx` from `/api/export?kind=…`, which re-checks the session
-itself — a staff account gets a 403 whether or not the button is on screen.
+Owners get a **Reports** card on the Manage tab. It answers "what changed,
+and what do I do about it" — every figure is shown against the period
+before, picked as **vs yesterday / vs last week / vs last month**
+(`/api/report?period=day|week|month`, which re-checks the session itself, so
+a staff account gets a 403 whether or not the button is on screen).
 
-`src/lib/xlsx.ts` writes the workbook directly (an xlsx is a ZIP of OOXML parts)
-rather than pulling in a spreadsheet dependency. `scripts/check-xlsx.mjs`
-round-trips it — run it after touching that file:
+The front page reconciles as a stock account:
+
+```
+closing = opening + received - wasted + counted_up - counted_down
+```
+
+`opening` is not stored anywhere — it is reconstructed by taking today's
+total and unwinding every move since. That works because **give** and
+**transfer** only shuffle stock between the storeroom and the two bars, so
+they leave the combined total untouched; only receive, waste and counts
+change it. `scripts/check-report.mjs` proves exactly that, by running each
+move type against the real database and measuring what it actually did.
+
+Then, in order: what to **order** now, movement **by category**, the
+**biggest movers**, **count corrections** (where a physical count disagreed
+with the system — the leakage signal this app exists for), **wastage**,
+**deliveries** by supplier, and stock **sitting untouched**.
+
+Everything is quantity-based. There is no cost or price anywhere in this
+database, so pour cost, inventory value and COGS are not computable and are
+deliberately absent rather than guessed at. For the same reason a count
+coming down cannot be split into "sold" versus "walked off" — the report
+labels that figure honestly instead of implying it is shrinkage.
+
+`src/lib/pdf.ts` writes the PDF directly (objects plus one content stream
+per page, indexed by a byte-offset xref table) rather than pulling in a
+rendering library. Run the checks after touching either file:
 
 ```bash
-node --experimental-strip-types scripts/check-xlsx.mjs
+node --env-file=.env.local --experimental-strip-types scripts/check-report.mjs
 ```
 
 ## Roles
 
-| | Give out / Receive / Count | Undo own entry | Manage bottles, staff & export |
+| | Give out / Receive / Count | Undo own entry | Manage bottles, staff & reports |
 |---|---|---|---|
 | **staff** | yes (incl. deliveries) | yes | no |
 | **owner** | yes (incl. deliveries) | any entry | yes |

@@ -19,6 +19,7 @@ export const LOC_SHORT: Record<Loc, string> = {
 export type Item = {
   id: number; name: string; cat: Cat;
   store: number; patio: number; back: number; rl: number;
+  ignore_reorder: boolean;
 };
 
 export type Move = {
@@ -91,13 +92,15 @@ export const totalOf = (i: Item) => i.store + i.patio + i.back;
  * Mixers (juices, syrups, salt, Tajin) are consumables nobody walks off with, and
  * they were 11 of the 55 day-one alerts. They stay out of every reorder surface —
  * a mixer at zero still shows OUT on the Stock tab, it just doesn't raise an alert.
+ * Same for any single item with ignore_reorder set (e.g. a flavor being sold down,
+ * not restocked) - a category-wide switch and a per-item one, same effect.
  *
  * Reorder is measured against the STORE only: you reorder from the supplier into
  * the storeroom, not into a bar.
  */
 export const NO_REORDER_ALERTS: readonly Cat[] = ["MIXER"];
 export const needsReorder = (i: Item) =>
-  !NO_REORDER_ALERTS.includes(i.cat) && i.store <= i.rl;
+  !i.ignore_reorder && !NO_REORDER_ALERTS.includes(i.cat) && i.store <= i.rl;
 
 /** "WHISKEY" -> "Whiskey", "manage" -> "Manage". */
 export const cap = (c: string) => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();

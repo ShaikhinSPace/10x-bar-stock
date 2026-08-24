@@ -384,7 +384,13 @@
     "rl": 24
   },
   {
-    "name": "High noon",
+    "name": "High Noon Watermelon",
+    "cat": "BEER",
+    "store": 0,
+    "rl": 24
+  },
+  {
+    "name": "High Noon Pineapple",
     "cat": "BEER",
     "store": 0,
     "rl": 24
@@ -402,7 +408,13 @@
     "rl": 24
   },
   {
-    "name": "Nutrl",
+    "name": "Nutrl Watermelon",
+    "cat": "BEER",
+    "store": 0,
+    "rl": 24
+  },
+  {
+    "name": "Nutrl Pineapple",
     "cat": "BEER",
     "store": 0,
     "rl": 24

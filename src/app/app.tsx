@@ -8,7 +8,8 @@ import {
 } from "@/lib/model";
 import {
   addItem, addUser, archiveItem, giveOut, logWaste, logout, receive, submitStocktake,
-  receiveDelivery, setCount, setReorderLevel, setUserActive, transferBar, undoMove, type Result,
+  receiveDelivery, setCount, setReorderIgnore, setReorderLevel, setUserActive, transferBar, undoMove,
+  type Result,
 } from "./actions";
 
 type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
@@ -212,7 +213,8 @@ export function App({
               <button onClick={() => logout()}>Sign out</button>
             </div>
 
-            {tab === "dashboard" && <Dashboard items={items} moves={recent} now={now} onPick={setSheetId} />}
+            {tab === "dashboard" && <Dashboard items={items} moves={recent} now={now} onPick={setSheetId}
+                user={user} pending={pending} run={run} />}
             {tab === "stock" && <Stock items={items} moves={recent} now={now} user={user} pending={pending} run={run}
                 onPick={setSheetId} />}
             {tab === "delivery" && <Delivery items={items} deliveries={deliveries} run={run} pending={pending} />}
@@ -259,8 +261,12 @@ export function App({
 /* ============================ dashboard ============================ */
 
 function Dashboard({
-  items, moves, now, onPick,
-}: { items: Item[]; moves: Move[]; now: number; onPick: (id: number) => void }) {
+  items, moves, now, onPick, user, pending, run,
+}: {
+  items: Item[]; moves: Move[]; now: number; onPick: (id: number) => void;
+  user: SessionUser; pending: boolean;
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+}) {
   const since = now - 7 * DAY;
   const storeTot = sumAt(items, "store");
   const patioTot = sumAt(items, "patio");
@@ -309,7 +315,7 @@ function Dashboard({
           </div>
         </div>
 
-        <ReorderTable rows={reorder} onPick={onPick} />
+        <ReorderTable rows={reorder} onPick={onPick} canIgnore={user.role === "owner"} pending={pending} run={run} />
 
         <CategoryCard items={items} />
         <TrendCard moves={moves} now={now} />
@@ -366,7 +372,12 @@ function WastageCard({ moves, now }: { moves: Move[]; now: number }) {
  */
 type ReorderSortKey = "name" | "store" | "onBars" | "rl";
 
-function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => void }) {
+function ReorderTable({
+  rows, onPick, canIgnore, pending, run,
+}: {
+  rows: Item[]; onPick: (id: number) => void; canIgnore: boolean; pending: boolean;
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+}) {
   const { sort, toggle } = useColumnSort<ReorderSortKey>();
   const shown = sortRows(rows, sort, (i, key) =>
     key === "name" ? i.name : key === "store" ? i.store : key === "onBars" ? i.patio + i.back : i.rl);
@@ -391,6 +402,7 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
                 <SortTh label="In store" thKey="store" sort={sort} toggle={toggle} className="num" />
                 <SortTh label="On bars" thKey="onBars" sort={sort} toggle={toggle} className="num hide-sm" />
                 <SortTh label="Reorder at" thKey="rl" sort={sort} toggle={toggle} className="num" />
+                {canIgnore && <th className="num"><span className="sr-only">Ignore</span></th>}
               </tr>
             </thead>
             <tbody>
@@ -410,6 +422,21 @@ function ReorderTable({ rows, onPick }: { rows: Item[]; onPick: (id: number) => 
                     <td className="num short">{fmtQty(i.cat, i.store)}</td>
                     <td className="num hide-sm">{fmtQty(i.cat, i.patio + i.back)}</td>
                     <td className="num">{fmtQty(i.cat, i.rl)}</td>
+                    {canIgnore && (
+                      <td className="num">
+                        <button className="rignore" disabled={pending}
+                          aria-label={`Ignore reorder alerts for ${i.name}`}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            run(() => setReorderIgnore(i.id, true), `${i.name} won't raise reorder alerts anymore`, false);
+                          }}>
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                            <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
+                              strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        </button>
+                      </td>
+                    )}
                   </tr>
                 );
               })}
@@ -1606,8 +1633,7 @@ function Manage({
 
   const [addStaffOpen, setAddStaffOpen] = useState(false);
   const addStaffRef = usePopoverClose(addStaffOpen, () => setAddStaffOpen(false));
-  const [exportOpen, setExportOpen] = useState(false);
-  const exportRef = usePopoverClose(exportOpen, () => setExportOpen(false));
+  const [reportPeriod, setReportPeriod] = useState<"day" | "week" | "month">("week");
 
   const filtered = useMemo(() => {
     const out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
@@ -1745,48 +1771,28 @@ function Manage({
 
       <div className="card">
         <div className="ch">
-          <h3>Export to Excel</h3>
-          <div className="popover-anchor mg-popover-trigger" ref={exportRef}>
-            <button className="btn sm" onClick={() => setExportOpen((o) => !o)}>
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
-              </svg>
-              Export
-            </button>
-            {exportOpen && (
-              <div className="popover popover-wide">
-                <button className="popover-close" aria-label="Close" onClick={() => setExportOpen(false)}>×</button>
-                <div className="xgrid">
-                  {([
-                    ["stock", "Stock list", "Every bottle, per location, with totals and status"],
-                    ["reorder", "Reorder list", "Only what is at or below its reorder point"],
-                    ["deliveries", "Deliveries", "One row per delivery line, with invoice and supplier"],
-                    ["activity", "Full activity", "Every give-out, delivery and count ever logged"],
-                    ["all", "Everything", "All four as separate sheets in one workbook"],
-                  ] as const).map(([kind, title, blurb]) => (
-                    <a className={`xcard${kind === "all" ? " xall" : ""}`} key={kind}
-                       href={`/api/export?kind=${kind}`} download>
-                      <span className="xi">
-                        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"
-                             stroke="currentColor" strokeWidth="2">
-                          <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
-                          <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
-                        </svg>
-                      </span>
-                      <span className="xt">
-                        <span className="n">{title}</span>
-                        <span className="b">{blurb}</span>
-                      </span>
-                    </a>
-                  ))}
-                </div>
-                <div className="hint">
-                  Downloads a real .xlsx — open it straight in Excel or Numbers.
-                </div>
-              </div>
-            )}
-          </div>
+          <h3>Reports</h3>
+          <a className="btn sm" href={`/api/report?period=${reportPeriod}`} download>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M12 3v12m0 0 4-4m-4 4-4-4" strokeLinecap="round" strokeLinejoin="round" />
+              <path d="M4 17v2a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-2" strokeLinecap="round" />
+            </svg>
+            Generate report
+          </a>
+        </div>
+        <div className="chips" style={{ marginBottom: 10 }}>
+          {([["day", "vs yesterday"], ["week", "vs last week"], ["month", "vs last month"]] as const)
+            .map(([p, label]) => (
+              <button key={p} className={`chip${reportPeriod === p ? " on" : ""}`}
+                onClick={() => setReportPeriod(p)}>
+                {label}
+              </button>
+            ))}
+        </div>
+        <div className="hint">
+          A printable PDF: what you need to order, what moved, where counts disagreed with the
+          system, wastage, deliveries and stock sitting untouched — each compared against the
+          period before.
         </div>
       </div>
 
@@ -1819,6 +1825,7 @@ function Manage({
               <div className="t">{i.name}</div>
               <div className="s">
                 {cap(i.cat)} · store {fmtQty(i.cat, i.store)} · patio {fmtQty(i.cat, i.patio)} · back {fmtQty(i.cat, i.back)}
+                {i.ignore_reorder && " · reorder alerts off"}
               </div>
             </div>
             <div className="rl">
@@ -1829,6 +1836,19 @@ function Manage({
                   if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`, false);
                 }} />
             </div>
+            <button className={`rignore${i.ignore_reorder ? " on" : ""}`}
+              aria-label={i.ignore_reorder
+                ? `Turn reorder alerts back on for ${i.name}` : `Ignore reorder alerts for ${i.name}`}
+              onClick={() => run(
+                () => setReorderIgnore(i.id, !i.ignore_reorder),
+                i.ignore_reorder ? `${i.name} reorder alerts back on` : `${i.name} won't raise reorder alerts anymore`,
+                false
+              )}>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
             <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
               if (confirm(`Remove "${i.name}" from the list? Its past activity stays in the log.`)) {
                 run(() => archiveItem(i.id), "Bottle removed", false);

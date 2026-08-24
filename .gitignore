@@ -40,5 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# exports downloaded from /api/export — real stock data, not source
+# reports downloaded from /api/report — real stock data, not source
+10x-bar-*.pdf
 10x-bar-*.xlsx

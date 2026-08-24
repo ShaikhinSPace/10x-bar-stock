@@ -441,6 +441,15 @@ export async function setReorderLevel(itemId: number, rl: number): Promise<Resul
   });
 }
 
+/** Silences one item's reorder alert without touching its reorder level. */
+export async function setReorderIgnore(itemId: number, ignore: boolean): Promise<Result> {
+  return attempt(async () => {
+    await requireOwner();
+    await sql`update items set ignore_reorder = ${ignore} where id = ${itemId}`;
+    refresh();
+  });
+}
+
 export async function batchSetReorderLevels(updates: { id: number; rl: number }[]): Promise<Result> {
   return attempt(async () => {
     await requireOwner();

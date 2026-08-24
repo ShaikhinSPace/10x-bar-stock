@@ -543,6 +543,18 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .rstat.out { color: var(--red); }   .rstat.out i { background: var(--red); }
 .rstat.low { color: var(--amber); } .rstat.low i { background: var(--amber); }
 
+.rignore {
+  width: 30px; height: 30px; border-radius: 8px; flex: none;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--txt-3); display: inline-flex; align-items: center; justify-content: center;
+  transition: all 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .rignore:hover { color: var(--txt-2); border-color: var(--line-2); }
+}
+.rignore.on { color: var(--amber); background: var(--amber-glow); border-color: rgba(245, 158, 11, 0.3); }
+.mrow .rignore { width: 36px; height: 36px; border-radius: 10px; }
+
 /* ================================================================
    ACTIVITY LOG
    ================================================================ */
@@ -1357,43 +1369,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   padding-top: 12px; border-top: 1px solid var(--line);
 }
 
-/* ================================================================
-   EXPORT TO EXCEL
-   ================================================================ */
-
-.xgrid { display: grid; grid-template-columns: 1fr; gap: 10px; }
-.xcard {
-  display: flex; align-items: center; gap: 14px;
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r);
-  padding: 14px 16px;
-  text-decoration: none; color: inherit;
-  transition: all 0.15s ease;
-  box-shadow: var(--shadow-sm);
-}
-@media (hover: hover) and (pointer: fine) {
-  .xcard:hover {
-    border-color: rgba(52, 211, 153, 0.35);
-    background: rgba(52, 211, 153, 0.05);
-    transform: translateY(-1px);
-    box-shadow: var(--shadow-md);
-  }
-}
-.xcard .xi {
-  flex: none; width: 36px; height: 36px; border-radius: 10px;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--green-glow); color: var(--green);
-}
-.xcard .xt { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.xcard .xt .n { font-size: 14px; font-weight: 600; }
-.xcard .xt .b { font-size: 11.5px; color: var(--txt-3); line-height: 1.4; }
-.xcard.xall { border-style: dashed; }
-@media (min-width: 700px) {
-  .xgrid { grid-template-columns: 1fr 1fr; }
-  .xcard.xall { grid-column: 1 / -1; }
-}
-
 /* ==================== stocktake ==================== */
 .stk-start { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
   background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
@@ -1470,7 +1445,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   box-shadow: var(--shadow-lg);
   padding: 18px 16px 16px;
 }
-.popover.popover-wide { width: min(560px, calc(100vw - 32px)); }
 .popover-close {
   position: absolute; top: 10px; right: 10px;
   width: 26px; height: 26px; border-radius: 8px;
@@ -1479,4 +1453,3 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 }
 @media (hover: hover) and (pointer: fine) { .popover-close:hover { background: var(--surface-2); color: var(--txt); } }
 .popover .frm { margin-top: 4px; }
-.popover .xgrid { margin-top: 4px; }
