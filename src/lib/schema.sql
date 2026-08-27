@@ -21,7 +21,8 @@ create table if not exists categories (
   name text not null unique
 );
 insert into categories (name) values
-  ('WHISKEY'), ('VODKA'), ('TEQUILA'), ('GIN'), ('RUM'), ('BEER'), ('WINE'), ('MIXER'), ('OTHER')
+  ('WHISKEY'), ('VODKA'), ('TEQUILA'), ('GIN'), ('RUM'), ('BEER'), ('WINE'), ('MIXER'),
+  ('WELL'), ('OTHER')
 on conflict (name) do nothing;
 
 create table if not exists items (
@@ -62,6 +63,18 @@ alter table items add column if not exists back_levels  numeric(10,2)[] not null
 alter table items drop constraint if exists items_cat_check;
 alter table items drop constraint if exists items_cat_fkey;
 alter table items add constraint items_cat_fkey foreign key (cat) references categories(name);
+
+-- Extra categories beyond items.cat. A bottle has ONE main category - which
+-- drives every total, colour and the beer cases-of-24 rule - plus any number
+-- of tags here, so "WELL WHISKEY" counts once under Whiskey while still being
+-- findable under Well. Keeping tags out of items.cat is what stops the report's
+-- category totals from double-counting a bottle and exceeding real stock.
+create table if not exists item_tags (
+  item_id int  not null references items(id) on delete cascade,
+  cat     text not null references categories(name),
+  primary key (item_id, cat)
+);
+create index if not exists item_tags_cat_idx on item_tags (cat);
 
 -- item_name/cat are denormalised on purpose: the activity log has to stay readable
 -- after an item is archived or renamed.

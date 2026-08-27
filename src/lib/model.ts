@@ -1,7 +1,7 @@
 // Shared shapes and constants. No server imports — the client bundle pulls this in.
 
 export const CATS = [
-  "WHISKEY", "VODKA", "TEQUILA", "GIN", "RUM", "BEER", "WINE", "MIXER", "OTHER",
+  "WHISKEY", "VODKA", "TEQUILA", "GIN", "RUM", "BEER", "WINE", "MIXER", "WELL", "OTHER",
 ] as const;
 export type Cat = (typeof CATS)[number];
 
@@ -27,7 +27,17 @@ export type Item = {
    * the truth either way.
    */
   patio_levels: number[]; back_levels: number[];
+  /**
+   * Extra categories beyond `cat`. `cat` stays the single main one that drives
+   * every total, colour and the beer cases rule; these only widen what the
+   * bottle can be filtered by, so nothing gets counted twice.
+   */
+  tags: Cat[];
 };
+
+/** Main category plus tags - what this bottle can be filtered under. */
+export const catsOf = (i: Item): Cat[] => [i.cat, ...i.tags.filter((t) => t !== i.cat)];
+export const inCat = (i: Item, c: string) => i.cat === c || i.tags.includes(c as Cat);
 
 /** The bottle-level breakdown for a bar. Store holds unopened bottles only. */
 export const levelsAt = (i: Item, loc: Loc): number[] =>

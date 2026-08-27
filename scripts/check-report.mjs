@@ -131,9 +131,36 @@ try {
     "closing must equal opening + received - wasted + counted_up - counted_down"
   );
 
+  // --- tags must never leak into the category totals ---
+  // A bottle carries ONE main category plus any number of tags. The report
+  // groups by items.cat alone, so the per-category totals have to add up to
+  // real stock exactly. If tags ever started counting as categories, a well
+  // whiskey would land in both Whiskey and Well and the totals would exceed
+  // the stock that actually exists. Proven here with a tag in place.
+  const [tagCat] = await sql`select name from categories where name <> 'WHISKEY' limit 1`;
+  await sql`insert into item_tags (item_id, cat) values (${id}, ${tagCat.name})
+            on conflict do nothing`;
+  try {
+    const [{ t: real }] = await sql`
+      select coalesce(sum(store + patio + back), 0) t from items where not archived`;
+    const perCat = await sql`
+      select coalesce(sum(store + patio + back), 0) q from items where not archived group by cat`;
+    const summed = round(perCat.reduce((a, r) => a + Number(r.q), 0));
+    assert.equal(summed, round(real),
+      `per-category totals (${summed}) must equal real stock (${round(real)}) - a tagged `
+      + `bottle is being counted under more than one category`);
+
+    const [{ n }] = await sql`
+      select count(*) n from item_tags t join items i on i.id = t.item_id and i.cat = t.cat`;
+    assert.equal(Number(n), 0, "an item's main category must never also be stored as one of its tags");
+  } finally {
+    await sql`delete from item_tags where item_id = ${id}`;
+  }
+
   console.log(
     `report ok - ${cases.length} move types measured against the real database; `
-    + `give and transfer confirmed stock-neutral; opening ${opening} -> closing ${closing} reconciles`
+    + `give and transfer confirmed stock-neutral; opening ${opening} -> closing ${closing} reconciles; `
+    + `category totals still exact with a tag applied`
   );
 } finally {
   if (moveIds.length) await sql`delete from moves where id = any(${moveIds})`;

@@ -27,13 +27,19 @@ const nums = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter(Number.isF
 
 export async function getItems(): Promise<Item[]> {
   const rows = await sql`
-    select id, name, cat, store, patio, back, rl, ignore_reorder, patio_levels, back_levels
-    from items where not archived order by name`;
+    select i.id, i.name, i.cat, i.store, i.patio, i.back, i.rl, i.ignore_reorder,
+           i.patio_levels, i.back_levels,
+           coalesce(array_agg(t.cat order by t.cat) filter (where t.cat is not null), '{}') as tags
+    from items i left join item_tags t on t.item_id = i.id
+    where not i.archived
+    group by i.id
+    order by i.name`;
   return rows.map((r) => ({
     id: r.id, name: r.name, cat: r.cat,
     store: num(r.store)!, patio: num(r.patio)!, back: num(r.back)!, rl: num(r.rl)!,
     ignore_reorder: r.ignore_reorder,
     patio_levels: nums(r.patio_levels), back_levels: nums(r.back_levels),
+    tags: Array.isArray(r.tags) ? r.tags : [],
   }));
 }
 

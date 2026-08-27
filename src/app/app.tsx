@@ -2,19 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import {
-  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, levelsAt, needsReorder,
-  openLabel, totalOf,
+  CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, inCat, levelsAt,
+  needsReorder, openLabel,
   type Cat, type Delivery as Booked, type DeliveryLine, type Item, type Loc, type Move,
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, countBarBottles, giveOut, logWaste, logout, receive, submitStocktake,
+  addItem, addUser, archiveItem, countBarBottles, editItem, giveOut, logWaste, logout, receive,
+  submitStocktake,
   receiveDelivery, setCount, setReorderIgnore, setReorderLevel, setUserActive, transferBar, undoMove,
   type Result,
 } from "./actions";
 
 type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
-type SheetAct = "give" | "receive" | "transfer" | "waste" | "count";
+type SheetAct = "give" | "receive" | "transfer" | "waste" | "count" | "edit";
 
 const DAY = 864e5;
 
@@ -86,7 +87,7 @@ const LOC_ICON: Record<Loc, React.ReactNode> = {
 const CAT_COLOR: Record<Cat, string> = {
   WHISKEY: "#C08A4A", VODKA: "#6FA8DC", TEQUILA: "#8FBF6A", GIN: "#5FB8A8",
   RUM: "#C2705A", BEER: "#D6A63C", WINE: "#B0607F", MIXER: "#7E8CA8",
-  OTHER: "#8E86F2",
+  WELL: "#9AA3B2", OTHER: "#8E86F2",
 };
 
 const LOC_COLOR: Record<Loc, string> = {
@@ -102,11 +103,16 @@ const LOC_COLOR: Record<Loc, string> = {
  * Alternating lightness (0.59/0.67 OKLCH) between adjacent categories in
  * fixed hue order clears an 8+ OKLab pairwise-distance target across all 9 —
  * worst case (Whiskey/Other) checked at 10.3.
+ *
+ * WELL is deliberately a neutral grey rather than another hue: it is a
+ * cross-cutting tag (a well bottle is also a whiskey, a gin...), so it should
+ * not compete with the real spirit categories for a slot in that palette.
+ * It only ever appears as a main category if someone explicitly picks it.
  */
 const CAT_BAR_COLOR: Record<Cat, string> = {
   WHISKEY: "#C75157", VODKA: "#D67B19", TEQUILA: "#8F7E03", GIN: "#5FAB4D",
   RUM: "#069180", BEER: "#00A6C9", WINE: "#457BD5", MIXER: "#A47DE3",
-  OTHER: "#B55499",
+  WELL: "#8A93A3", OTHER: "#B55499",
 };
 
 /* ============================ helpers ============================ */
@@ -236,7 +242,7 @@ export function App({
       <div className={`sheet${sheetItem ? " show" : ""}`}>
         {sheetItem && (
           <Sheet key={sheetItem.id} item={sheetItem} pending={pending} run={run}
-            onClose={() => setSheetId(null)} />
+            canEdit={user.role === "owner"} onClose={() => setSheetId(null)} />
         )}
       </div>
 
@@ -659,7 +665,9 @@ function Stock({
   const shown = useMemo(() => {
     let out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
     if (lowOnly) out = loc === "store" ? out.filter(needsReorder) : out.filter((i) => i[loc] > 0);
-    else if (cat !== "ALL") out = out.filter((i) => i.cat === cat);
+    // Matches the main category or any tag, so picking Well finds every well
+    // bottle without changing what they count towards.
+    else if (cat !== "ALL") out = out.filter((i) => inCat(i, cat));
     const needle = q.trim().toLowerCase();
     if (needle) out = out.filter((i) => i.name.toLowerCase().includes(needle));
     return out;
@@ -687,7 +695,7 @@ function Stock({
         },
       ];
 
-  const cats = ["ALL", ...CATS.filter((c) => items.some((i) => i.cat === c))];
+  const cats = ["ALL", ...CATS.filter((c) => items.some((i) => inCat(i, c)))];
 
   if (counting) {
     return (
@@ -713,7 +721,8 @@ function Stock({
 
       <div className="locs">
         {LOCS.map((k) => (
-          <button key={k} className={`loc${loc === k ? " on" : ""}`}
+          <button key={k} data-loc={k} aria-pressed={loc === k}
+            className={`loc${loc === k ? " on" : ""}`}
             onClick={() => { setLoc(k); setLowOnly(k !== "store"); }}>
             {LOC_ICON[k]}
             <span className="nm">{LOC_SHORT[k]}</span>
@@ -776,21 +785,19 @@ function Stock({
               className={`row${zero && loc === "store" ? " zero" : ""}${low ? " lowstk" : ""}`}>
               <div className="info">
                 <div className="nm">{i.name}</div>
-                <div className="dist">
-                  <span className="d-store">Store <b>{fmtQty(i.cat, i.store)}</b></span>
-                  <span className="d-patio">
-                    Patio <b>{fmtQty(i.cat, i.patio)}</b>
-                    {openLabel(i, "patio") && <i className="opn">{openLabel(i, "patio")}</i>}
-                  </span>
-                  <span className="d-back">
-                    Back <b>{fmtQty(i.cat, i.back)}</b>
-                    {openLabel(i, "back") && <i className="opn">{openLabel(i, "back")}</i>}
-                  </span>
-                </div>
+                {/* Just what the bottle IS. The quantities used to be repeated
+                    here for all three locations at once, which buried the one
+                    figure you're actually looking at. */}
+                <div className="dist"><span className="d-cat">{cap(i.cat)}</span></div>
               </div>
               {loc === "store" && zero && <span className="pill out">OUT</span>}
               {loc === "store" && low && <span className="pill low">LOW</span>}
-              <div className="qty">{fmtQty(i.cat, totalOf(i))}<small>total</small></div>
+              {/* The figure for the location you picked, not a grand total. */}
+              <div className="qty">
+                {fmtQty(i.cat, v)}
+                <small>{loc === "store" ? "in store" : `on ${LOC_SHORT[loc].toLowerCase()}`}</small>
+                {openLabel(i, loc) && <small className="opn">{openLabel(i, loc)}</small>}
+              </div>
             </button>
           );
         })}
@@ -961,14 +968,21 @@ function Stocktake({
 /* ============================ item sheet ============================ */
 
 function Sheet({
-  item, pending, run, onClose,
+  item, pending, run, canEdit, onClose,
 }: {
-  item: Item; pending: boolean;
+  item: Item; pending: boolean; canEdit: boolean;
   run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
   onClose: () => void;
 }) {
   useEscapeClose(onClose);
   const [act, setAct] = useState<SheetAct>("give");
+
+  // Edit state - name and categories. Seeded from the item and reset by the
+  // key={item.id} on this component, so switching bottles never carries a
+  // half-typed name across.
+  const [eName, setEName] = useState(item.name);
+  const [eCat, setECat] = useState<Cat>(item.cat);
+  const [eTags, setETags] = useState<Cat[]>(item.tags);
   const [bar, setBar] = useState<Loc | null>(null);
   const [giveQty, setGiveQty] = useState(1);
   const [recvQty, setRecvQty] = useState(1);
@@ -1047,6 +1061,11 @@ function Sheet({
         <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
           Record wastage
         </button>
+        {canEdit && (
+          <button className={`actmore-btn${act === "edit" ? " on" : ""}`} onClick={() => setAct("edit")}>
+            Edit bottle
+          </button>
+        )}
       </div>
 
       {act === "give" && (
@@ -1242,6 +1261,49 @@ function Sheet({
               </button>
             </>
           )}
+        </div>
+      )}
+
+      {act === "edit" && canEdit && (
+        <div>
+          <div className="lbl">Name</div>
+          <div className="fld" style={{ marginBottom: 16 }}>
+            <input value={eName} autoComplete="off" aria-label="Bottle name"
+              onChange={(e) => setEName(e.target.value)} />
+          </div>
+
+          <div className="lbl">Main category</div>
+          <div className="fld" style={{ marginBottom: 16 }}>
+            <select value={eCat} aria-label="Main category"
+              onChange={(e) => setECat(e.target.value as Cat)}>
+              {CATS.map((c) => <option key={c} value={c}>{cap(c)}</option>)}
+            </select>
+          </div>
+
+          <div className="lbl">Also counts as</div>
+          <div className="tagrow">
+            {CATS.filter((c) => c !== eCat).map((c) => {
+              const on = eTags.includes(c);
+              return (
+                <button key={c} className={`tagchip${on ? " on" : ""}`} aria-pressed={on}
+                  onClick={() => setETags((t) => (on ? t.filter((x) => x !== c) : [...t, c]))}>
+                  {cap(c)}
+                </button>
+              );
+            })}
+          </div>
+          <div className="hint" style={{ margin: "0 0 16px" }}>
+            The main category is what totals, colours and the beer cases rule use.
+            Extra ones only make it findable there too — nothing is counted twice.
+          </div>
+
+          <button className="commit" disabled={pending || !eName.trim()}
+            onClick={() => run(
+              () => editItem(item.id, eName, eCat, eTags.filter((t) => t !== eCat)),
+              `Saved ${eName.trim()}`
+            )}>
+            {pending ? "Saving…" : "Save changes"}
+          </button>
         </div>
       )}
     </div>
@@ -1735,6 +1797,7 @@ function Manage({
   const [addStaffOpen, setAddStaffOpen] = useState(false);
   const addStaffRef = usePopoverClose(addStaffOpen, () => setAddStaffOpen(false));
   const [reportPeriod, setReportPeriod] = useState<"day" | "week" | "month">("week");
+  const [allOpen, setAllOpen] = useState(false);
 
   const filtered = useMemo(() => {
     const out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
@@ -1748,9 +1811,17 @@ function Manage({
       : key === "store" ? i.store : key === "patio" ? i.patio
       : key === "back" ? i.back : i.rl);
 
+  if (allOpen) return <AllBottlesView items={items} run={run} onClose={() => setAllOpen(false)} />;
+
   return (
     <>
       <div className="ptitle">Manage <span className="sub">bottles, reorder points &amp; staff</span></div>
+
+      {/* Two columns on a wide screen: the three short panels stack down the
+          left, the one long list takes the right. Falls back to a single
+          stack below 900px, where the sidebar is gone anyway. */}
+      <div className="mgrid">
+        <div className="mg-col">
 
       <div className="card addcard">
         <div className="ch"><h3>Add a bottle</h3></div>
@@ -1897,72 +1968,160 @@ function Manage({
         </div>
       </div>
 
+        </div>
+
+        <div className="mg-col">
       <div className="card">
         <div className="ch">
           <h3>All bottles</h3>
           <span className="badge">{items.length}</span>
+          <button className="ch-open" onClick={() => setAllOpen(true)}>
+            Open full list
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
         </div>
-        <div className="search" style={{ marginBottom: 12 }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
-          </svg>
-          <input placeholder="Search bottles…" value={mq} autoComplete="off"
-            onChange={(e) => setMq(e.target.value)} />
-        </div>
-        <div className="chips" style={{ marginBottom: 12 }}>
-          {([
-            ["name", "Name"], ["cat", "Category"], ["store", "Store"],
-            ["patio", "Patio"], ["back", "Back"], ["rl", "Reorder"],
-          ] as const).map(([key, label]) => (
-            <button key={key} className={`chip${mSort?.key === key ? " on" : ""}`} onClick={() => mToggle(key)}>
-              {label}{mSort?.key === key && (mSort.dir === 1 ? " ▲" : " ▼")}
-            </button>
-          ))}
-        </div>
+        <BottleSearch value={mq} onChange={setMq} />
+        <BottleSortChips sort={mSort} toggle={mToggle} />
         {!shown.length && <div className="empty" style={{ padding: 20 }}>No bottles match.</div>}
-        {shown.map((i) => (
-          <div className="mrow" key={i.id}>
-            <div className="mn">
-              <div className="t">{i.name}</div>
-              <div className="s">
-                {cap(i.cat)} · store {fmtQty(i.cat, i.store)} · patio {fmtQty(i.cat, i.patio)} · back {fmtQty(i.cat, i.back)}
-                {i.ignore_reorder && " · reorder alerts off"}
-              </div>
-            </div>
-            <div className="rl">
-              <label>reorder</label>
-              <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
-                onBlur={(e) => {
-                  const v = Number(e.target.value);
-                  if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`, false);
-                }} />
-            </div>
-            <button className={`rignore${i.ignore_reorder ? " on" : ""}`}
-              aria-label={i.ignore_reorder
-                ? `Turn reorder alerts back on for ${i.name}` : `Ignore reorder alerts for ${i.name}`}
-              onClick={() => run(
-                () => setReorderIgnore(i.id, !i.ignore_reorder),
-                i.ignore_reorder ? `${i.name} reorder alerts back on` : `${i.name} won't raise reorder alerts anymore`,
-                false
-              )}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
-                  strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
-              if (confirm(`Remove "${i.name}" from the list? Its past activity stays in the log.`)) {
-                run(() => archiveItem(i.id), "Bottle removed", false);
-              }
-            }}>
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"
-                  strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </div>
-        ))}
+        {/* Capped so 136 bottles don't run the page on forever - the whole
+            list lives behind "Open full list" in the header above. */}
+        <div className="mlist">
+        {shown.map((i) => <BottleRow key={i.id} i={i} run={run} />)}
+        </div>
       </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/** One editable bottle - shared by the Manage card and the full-list view. */
+function BottleRow({ i, run }: {
+  i: Item;
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+}) {
+  return (
+    <div className="mrow">
+      <div className="mn">
+        <div className="t">{i.name}</div>
+        <div className="s">
+          {cap(i.cat)}
+          {i.tags.length > 0 && ` + ${i.tags.map(cap).join(", ")}`}
+          {" · "}store {fmtQty(i.cat, i.store)} · patio {fmtQty(i.cat, i.patio)} · back {fmtQty(i.cat, i.back)}
+          {i.ignore_reorder && " · reorder alerts off"}
+        </div>
+      </div>
+      <div className="rl">
+        <label>reorder</label>
+        <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
+          onBlur={(e) => {
+            const v = Number(e.target.value);
+            if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`, false);
+          }} />
+      </div>
+      <button className={`rignore${i.ignore_reorder ? " on" : ""}`}
+        aria-label={i.ignore_reorder
+          ? `Turn reorder alerts back on for ${i.name}` : `Ignore reorder alerts for ${i.name}`}
+        onClick={() => run(
+          () => setReorderIgnore(i.id, !i.ignore_reorder),
+          i.ignore_reorder ? `${i.name} reorder alerts back on` : `${i.name} won't raise reorder alerts anymore`,
+          false
+        )}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
+        if (confirm(`Remove "${i.name}" from the list? Its past activity stays in the log.`)) {
+          run(() => archiveItem(i.id), "Bottle removed", false);
+        }
+      }}>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M4 7h16M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"
+            strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+    </div>
+  );
+}
+
+function BottleSearch({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="search" style={{ marginBottom: 12 }}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
+      </svg>
+      <input placeholder="Search bottles…" value={value} autoComplete="off"
+        onChange={(e) => onChange(e.target.value)} />
+      {value && <button className="clr" aria-label="Clear search" onClick={() => onChange("")}>×</button>}
+    </div>
+  );
+}
+
+const MANAGE_SORTS = [
+  ["name", "Name"], ["cat", "Category"], ["store", "Store"],
+  ["patio", "Patio"], ["back", "Back"], ["rl", "Reorder"],
+] as const;
+
+function BottleSortChips({ sort, toggle }: {
+  sort: { key: ManageSortKey; dir: SortDir } | null;
+  toggle: (k: ManageSortKey) => void;
+}) {
+  return (
+    <div className="chips" style={{ marginBottom: 12 }}>
+      {MANAGE_SORTS.map(([key, label]) => (
+        <button key={key} className={`chip${sort?.key === key ? " on" : ""}`} onClick={() => toggle(key)}>
+          {label}{sort?.key === key && (sort.dir === 1 ? " ▲" : " ▼")}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The whole bottle list, as its own view rather than a card the page has to
+ * scroll past. Keeps its own search and sort so opening it always starts
+ * from the full list, and mounts only while open so Escape closes it.
+ */
+function AllBottlesView({ items, run, onClose }: {
+  items: Item[];
+  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  onClose: () => void;
+}) {
+  useEscapeClose(onClose);
+  const [q, setQ] = useState("");
+  const { sort, toggle } = useColumnSort<ManageSortKey>();
+
+  const filtered = useMemo(() => {
+    const out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
+    const needle = q.trim().toLowerCase();
+    return needle ? out.filter((i) => i.name.toLowerCase().includes(needle)) : out;
+  }, [items, q]);
+  const shown = sortRows(filtered, sort, (i, key) =>
+    key === "name" ? i.name : key === "cat" ? i.cat
+      : key === "store" ? i.store : key === "patio" ? i.patio
+      : key === "back" ? i.back : i.rl);
+
+  return (
+    <>
+      <div className="stk-head">
+        <div>
+          <div className="ptitle" style={{ margin: 0 }}>
+            All bottles <span className="sub">{shown.length} of {items.length}</span>
+          </div>
+          <div className="hint" style={{ marginTop: 4 }}>
+            Set a reorder point, mute its alerts, or remove a bottle.
+          </div>
+        </div>
+        <button className="btn ghost" onClick={onClose}>Done</button>
+      </div>
+      <BottleSearch value={q} onChange={setQ} />
+      <BottleSortChips sort={sort} toggle={toggle} />
+      {!shown.length && <div className="empty" style={{ padding: 20 }}>No bottles match.</div>}
+      {shown.map((i) => <BottleRow key={i.id} i={i} run={run} />)}
     </>
   );
 }

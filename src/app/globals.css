@@ -4,6 +4,11 @@
    ================================================================ */
 
 :root {
+  /* The UI is dark-only. Without this the browser still paints its own
+     chrome light - scrollbars came out bright white against the dark cards,
+     and the category <select> dropped down as a white menu. */
+  color-scheme: dark;
+
   /* ── backgrounds ── */
   --bg: #090E1A;
   --surface: #0F1629;
@@ -172,43 +177,52 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
    LOCATION SWITCHER & STATS
    ================================================================ */
 
-.locs { display: flex; gap: 10px; margin: 0 0 14px; }
+/* One switch with three segments, not three summary cards. The sunken
+   trough around them is what says "these are a control" - as separate
+   raised cards they read as read-only figures and nobody tapped them. Same
+   idiom as .actseg in the bottle sheet. */
+.locs {
+  display: flex; gap: 4px; margin: 0 0 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 4px;
+}
 .loc {
   flex: 1;
-  background: var(--surface);
-  border: 1.5px solid var(--line-2);
-  border-radius: var(--r);
-  padding: 12px 8px;
+  background: transparent;
+  border: 1.5px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 10px 8px;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 6px;
-  transition: all 0.2s ease;
-  box-shadow: var(--shadow-sm);
+  gap: 5px;
+  transition: all 0.18s ease;
 }
-@media (hover: hover) and (pointer: fine) { .loc:hover { border-color: var(--txt-3); } }
-.loc .ic { width: 20px; height: 20px; color: var(--txt-3); transition: color 0.2s ease; }
-.loc .nm { font-size: 13px; font-weight: 600; color: var(--txt-2); transition: color 0.2s ease; }
+@media (hover: hover) and (pointer: fine) {
+  .loc:hover:not(.on) { background: var(--surface-3); }
+  .loc:hover:not(.on) .nm { color: var(--txt-2); }
+}
+.loc .ic { width: 19px; height: 19px; color: var(--txt-3); transition: color 0.18s ease; }
+.loc .nm { font-size: 13px; font-weight: 600; color: var(--txt-3); transition: color 0.18s ease; }
 .loc .ct {
   font-family: var(--disp); font-weight: 700; font-size: 16px;
-  color: var(--txt-3); line-height: 1; transition: color 0.2s ease;
+  color: var(--txt-3); line-height: 1; transition: color 0.18s ease;
 }
-.loc.on[data-loc="store"] {
-  border-color: var(--store);
-  background: linear-gradient(135deg, rgba(76, 148, 255, 0.12) 0%, rgba(76, 148, 255, 0.04) 100%);
-  box-shadow: 0 0 20px rgba(76, 148, 255, 0.08);
+/* The selected segment lifts out of the trough in its own location colour.
+   These rules need data-loc on the button - it was missing, so every one of
+   them was dead and the only cue was a faint text colour. */
+.loc.on {
+  background: var(--surface);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
 }
-.loc.on[data-loc="patio"] {
-  border-color: var(--patio);
-  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12) 0%, rgba(34, 211, 238, 0.04) 100%);
-  box-shadow: 0 0 20px rgba(34, 211, 238, 0.08);
-}
-.loc.on[data-loc="back"] {
-  border-color: var(--back);
-  background: linear-gradient(135deg, rgba(167, 139, 250, 0.12) 0%, rgba(167, 139, 250, 0.04) 100%);
-  box-shadow: 0 0 20px rgba(167, 139, 250, 0.08);
-}
-.loc.on .nm, .loc.on .ic, .loc.on .ct { color: var(--txt); }
+.loc.on[data-loc="store"] { border-color: var(--store); background: rgba(76, 148, 255, 0.14); }
+.loc.on[data-loc="patio"] { border-color: var(--patio); background: rgba(34, 211, 238, 0.14); }
+.loc.on[data-loc="back"]  { border-color: var(--back);  background: rgba(167, 139, 250, 0.14); }
+.loc.on[data-loc="store"] .nm, .loc.on[data-loc="store"] .ic, .loc.on[data-loc="store"] .ct { color: var(--store); }
+.loc.on[data-loc="patio"] .nm, .loc.on[data-loc="patio"] .ic, .loc.on[data-loc="patio"] .ct { color: var(--patio); }
+.loc.on[data-loc="back"] .nm,  .loc.on[data-loc="back"] .ic,  .loc.on[data-loc="back"] .ct  { color: var(--back); }
 
 .stats { display: flex; gap: 10px; margin: 0 0 14px; }
 .stat {
@@ -328,9 +342,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   display: flex; gap: 10px; flex-wrap: wrap;
 }
 .row .dist b { font-weight: 600; font-variant-numeric: tabular-nums; }
-.row .dist .d-store b { color: var(--store); }
-.row .dist .d-patio b { color: var(--patio); }
-.row .dist .d-back b { color: var(--back); }
 .row .qty {
   font-family: var(--disp); font-weight: 700; font-size: 26px;
   line-height: 1; min-width: 44px; text-align: right; letter-spacing: -0.02em;
@@ -339,6 +350,10 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   font-size: 10px; color: var(--txt-3); display: block;
   font-family: var(--sans); font-weight: 500; text-transform: uppercase;
   letter-spacing: 0.05em; margin-top: 4px;
+}
+/* "3 open" under a bar's figure - quieter than the location label above it. */
+.row .qty small.opn {
+  text-transform: none; letter-spacing: 0; margin-top: 2px; font-weight: 600;
 }
 .row.zero .qty { color: var(--red); }
 .row.lowstk .qty { color: var(--amber); }
@@ -504,13 +519,29 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .tile.badstate .v { color: var(--red); }
 
 /* ── reorder table ── */
-.rscroll { max-height: 360px; overflow-y: auto; margin: 0 -3px; }
-.rtable { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+/* contain: paint is load-bearing, not a micro-optimisation. The sticky th
+   inside gets its own composited layer, and without paint containment Chrome
+   lets the scrolled rows paint straight through the header - visible as ghost
+   text above it, which doesn't even hit-test there. position: relative gives
+   the sticky cell a proper containing block. */
+.rscroll {
+  max-height: 360px; overflow-y: auto; margin: 0 -3px;
+  /* overflow-y:auto forces overflow-x to compute to auto as well, so a 1px
+     sub-pixel rounding on a width:100% table was enough to raise a full
+     horizontal scrollbar. Nothing here is meant to scroll sideways. */
+  overflow-x: hidden;
+  position: relative; contain: paint;
+}
+/* separate, not collapse: Chrome paints a collapsed-border table's cell
+   backgrounds at table level, so a sticky th slides away from its own
+   background and the scrolled rows show straight through the header. Only
+   bottom borders are set, so nothing doubles up without collapsing. */
+.rtable { width: 100%; border-collapse: separate; border-spacing: 0; font-size: 13.5px; }
 .rtable th {
   font-size: 10px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--txt-3); text-align: left; padding: 0 8px 10px 3px;
+  color: var(--txt-3); text-align: left; padding: 6px 8px 10px 3px;
   border-bottom: 1px solid var(--line-2);
-  position: sticky; top: 0; background: var(--surface);
+  position: sticky; top: 0; z-index: 2; background: var(--surface);
 }
 /* the button lives inside the <th>'s own padding, not on top of it, so a
    sortable header is the same size as the plain "Status" header beside it */
@@ -657,6 +688,9 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .btn {
   background: linear-gradient(135deg, var(--blue) 0%, #3A7BE8 100%);
   color: white;
+  /* Reports' "Generate report" is an <a download>, not a <button>, so without
+     this it renders underlined like a link. */
+  text-decoration: none;
   border-radius: var(--r-sm);
   padding: 13px;
   font-weight: 700;
@@ -833,11 +867,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .blv-tot { font-size: 12.5px; color: var(--txt-3); }
 .blv-tot b { color: var(--txt); font-family: var(--disp); font-size: 14px; }
 
-/* the "3 open" tag beside a bar's figure in the Stock list */
-.dist .opn {
-  font-style: normal; font-size: 10px; font-weight: 600;
-  color: var(--txt-3); margin-left: 4px;
-}
 
 .actseg {
   display: flex;
@@ -1112,6 +1141,19 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
      reasonably on their own) to a normal form width instead. */
   .addcard .frm { max-width: 480px; }
 
+  /* Manage: the three short panels down the left, the long bottle list on
+     the right. align-items: start so the left column keeps its natural
+     height instead of stretching to match 136 rows of bottles. */
+  .mgrid {
+    display: grid;
+    grid-template-columns: minmax(0, 460px) minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+  }
+  /* The form is already inside a ~460px column, so the extra cap would only
+     make it narrower again. */
+  .mgrid .addcard .frm { max-width: none; }
+
   /* sheet becomes a centered modal */
   .sheet {
     left: auto; right: auto; top: 0; bottom: 0;
@@ -1129,7 +1171,10 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
     border-radius: var(--r-lg);
     max-width: 460px; width: 100%;
     max-height: 88vh; overflow: auto;
-    padding: 26px 0;
+    /* Keep the 20px side inset the mobile sheet has. As a bottom sheet the
+       content can sit near the screen edge; as a bordered card it cannot -
+       "26px 0" put the title, labels and buttons flat against the border. */
+    padding: 26px 22px;
     transform: translateY(14px) scale(0.98);
     opacity: 0;
     transition: all 0.25s cubic-bezier(0.2, 0.9, 0.3, 1);
@@ -1447,13 +1492,25 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 
 .stk-list { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
   background: var(--surface); margin-top: 10px; }
-.stk-row { display: grid; grid-template-columns: 1fr 62px 92px 62px; align-items: center;
+/* 62px fits the numbers but not the header labels - "Expected" needs 74px
+   and "Variance" 72px at this size, so they used to spill into the next
+   column and read as "EXPECTEDCOUNTED". The name column has hundreds of
+   spare pixels, so the numeric columns simply get enough room. */
+.stk-row { display: grid; grid-template-columns: 1fr 84px 92px 84px; align-items: center;
   gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .stk-row:last-child { border-bottom: none; }
 .stk-row.has-var { background: var(--amber-glow); }
+/* 9px/.02em, not 10px/.07em: the wide tracking pushed "EXPECTED" to 74px and
+   "VARIANCE" to 72px, well past their columns, so the labels collided into
+   "EXPECTEDCOUNTED" and VARIANCE ran off the edge. */
 .stk-hdr { position: sticky; top: 0; z-index: 2; background: var(--surface-2);
-  font-size: 10px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase;
+  font-size: 9px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
   color: var(--txt-3); }
+/* The header reuses the value cells, which carry their own 13px - so EXPECTED
+   and VARIANCE rendered bigger than COUNTED and needed far more room than the
+   header's own size implies. Labels follow the header, values keep 13px.
+   Doubled up as .stk-row.stk-hdr to outrank ".stk-row .s-e" below it. */
+.stk-row.stk-hdr .s-e, .stk-row.stk-hdr .s-v { font-size: inherit; font-weight: inherit; }
 .stk-row .s-n { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .stk-row .s-n .nm { font-size: 13.5px; font-weight: 500; white-space: nowrap;
   overflow: hidden; text-overflow: ellipsis; }
@@ -1482,10 +1539,49 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .stk-foot .commit { width: auto; flex: none; padding: 13px 22px; font-size: 15px; }
 
 @media (max-width: 620px) {
-  .stk-row { grid-template-columns: 1fr 48px 76px 52px; gap: 6px; padding: 8px 9px; }
+  /* 48/52 couldn't hold the header labels even at the smaller type - the
+     name column has room to spare, so the numeric ones take what they need. */
+  .stk-row { grid-template-columns: 1fr 68px 76px 68px; gap: 6px; padding: 8px 9px; }
   .stk-row .s-a input { padding: 8px 6px; font-size: 14px; }
   .stk-foot .commit { width: 100%; }
 }
+
+/* .mgrid / .mg-col need no mobile rule at all - a div is already block, and
+   the cards' own margins carry the spacing exactly as before. Declaring
+   "display: block" here would sit LATER in the file than the desktop grid
+   rule and silently beat it, since media queries add no specificity. */
+
+/* Preview height only - the full 136 rows live in the "Open full list" view.
+   overflow-x is pinned because overflow-y:auto would otherwise compute it to
+   auto too, and a sub-pixel row width raises a stray horizontal scrollbar. */
+.mlist {
+  max-height: 340px; overflow-y: auto; overflow-x: hidden;
+  margin: 0 -2px; padding: 0 2px;
+}
+/* Sits at the far end of the card's header row, after the count badge. */
+.ch-open {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: 10px; padding: 6px 10px; border-radius: 9px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--txt-2); font-size: 12px; font-weight: 600; white-space: nowrap;
+  transition: all 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .ch-open:hover { color: var(--blue); border-color: var(--blue); }
+}
+
+/* ── item sheet: extra categories ── */
+.tagrow { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 10px; }
+.tagchip {
+  padding: 7px 12px; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--txt-3); font-size: 12.5px; font-weight: 600;
+  transition: all 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .tagchip:hover { color: var(--txt-2); border-color: var(--line-2); }
+}
+.tagchip.on { background: var(--blue-glow); border-color: var(--blue); color: var(--blue); }
 
 /* ── manage: popover triggers (Add staff / Export) ── */
 .btn.sm { padding: 8px 12px; font-size: 13px; border-radius: 10px; }

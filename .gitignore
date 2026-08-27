@@ -43,3 +43,11 @@ next-env.d.ts
 # reports downloaded from /api/report — real stock data, not source
 10x-bar-*.pdf
 10x-bar-*.xlsx
+
+# database dumps at the repo root — real stock data and password hashes.
+# Anchored with a leading slash so src/lib/seed-items.json stays tracked.
+/items.json
+/moves.json
+/users.json
+/categories.json
+/item_tags.json

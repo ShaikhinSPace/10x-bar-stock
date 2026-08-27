@@ -526,6 +526,52 @@ export async function addItem(
   });
 }
 
+/**
+ * Rename a bottle and set its categories.
+ *
+ * `cat` is the single main category - it drives every total, colour and the
+ * beer cases rule - and `tags` are extra categories it can also be filtered
+ * under, so a well whiskey counts once under Whiskey but still turns up under
+ * Well. The main category is never duplicated into tags.
+ *
+ * Past moves keep the old name on purpose: item_name is denormalised into
+ * `moves` precisely so the activity log stays readable after a rename.
+ */
+export async function editItem(
+  itemId: number, name: string, cat: Cat, tags: Cat[]
+): Promise<Result> {
+  return attempt(async () => {
+    await requireOwner();
+    const n = name.trim();
+    if (!n) throw new Error("Give the bottle a name");
+    if (n.length > 80) throw new Error("That name is too long");
+    if (!isCat(cat)) throw new Error("Pick a main category");
+
+    const extra = [...new Set((Array.isArray(tags) ? tags : []).filter(isCat))].filter((t) => t !== cat);
+    if (extra.length > CATS.length) throw new Error("Too many categories");
+
+    const renamed = await sql`
+      update items set name = ${n}, cat = ${cat}
+      where id = ${itemId} and not archived
+        and not exists (select 1 from items o where o.name = ${n} and o.id <> ${itemId})
+      returning id`;
+    if (!renamed.length) {
+      const [clash] = await sql`select id from items where name = ${n} and id <> ${itemId}`;
+      throw new Error(clash ? `"${n}" is already on the list.` : "That bottle is no longer in the list.");
+    }
+
+    // Replace the tag set wholesale - simpler than diffing, and the table is
+    // at most a handful of rows per item.
+    await sql`delete from item_tags where item_id = ${itemId}`;
+    if (extra.length) {
+      await sql`
+        insert into item_tags (item_id, cat)
+        select ${itemId}, c from unnest(${extra}::text[]) as c`;
+    }
+    refresh();
+  });
+}
+
 export async function setReorderLevel(itemId: number, rl: number): Promise<Result> {
   return attempt(async () => {
     await requireOwner();
