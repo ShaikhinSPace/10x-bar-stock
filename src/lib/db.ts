@@ -22,14 +22,18 @@ export function requestNow(): number {
 // numeric(10,2) arrives from pg as a string; the whole UI does arithmetic on these.
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
+/** numeric[] arrives from pg as an array of strings. */
+const nums = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : []);
+
 export async function getItems(): Promise<Item[]> {
   const rows = await sql`
-    select id, name, cat, store, patio, back, rl, ignore_reorder from items
-    where not archived order by name`;
+    select id, name, cat, store, patio, back, rl, ignore_reorder, patio_levels, back_levels
+    from items where not archived order by name`;
   return rows.map((r) => ({
     id: r.id, name: r.name, cat: r.cat,
     store: num(r.store)!, patio: num(r.patio)!, back: num(r.back)!, rl: num(r.rl)!,
     ignore_reorder: r.ignore_reorder,
+    patio_levels: nums(r.patio_levels), back_levels: nums(r.back_levels),
   }));
 }
 

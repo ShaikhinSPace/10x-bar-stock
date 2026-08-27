@@ -75,7 +75,20 @@ export async function giveOut(itemId: number, qty: number, to: Loc): Promise<Res
         update items set
           store = store - ${q},
           patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
-          back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end
+          back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
+          -- Whole unopened bottles, so they join the breakdown as full ones -
+          -- but only where a breakdown already exists, or its sum would stop
+          -- matching the total. Empty stays empty until someone counts.
+          -- The ::int cast below is load-bearing: a bound parameter arrives
+          -- as text, so without it this is array_fill(numeric, text[]) and
+          -- fails at runtime. (Never interpolate into a SQL comment either -
+          -- the driver still binds it, leaving a parameter nothing uses.)
+          patio_levels = case when ${to}::text = 'patio' and cardinality(patio_levels) > 0
+                              then patio_levels || array_fill(1::numeric, array[${q}::int])
+                              else patio_levels end,
+          back_levels  = case when ${to}::text = 'back'  and cardinality(back_levels) > 0
+                              then back_levels  || array_fill(1::numeric, array[${q}::int])
+                              else back_levels end
         where id = ${itemId} and not archived and store >= ${q}
         returning id
       )
@@ -235,7 +248,11 @@ export async function submitStocktake(
         update items i set
           store = case when ${loc}::text = 'store' then c.val else i.store end,
           patio = case when ${loc}::text = 'patio' then c.val else i.patio end,
-          back  = case when ${loc}::text = 'back'  then c.val else i.back  end
+          back  = case when ${loc}::text = 'back'  then c.val else i.back  end,
+          -- A stocktake row is one total per bottle, not a bottle-by-bottle
+          -- breakdown, so it replaces any breakdown with "unknown".
+          patio_levels = case when ${loc}::text = 'patio' then '{}'::numeric[] else i.patio_levels end,
+          back_levels  = case when ${loc}::text = 'back'  then '{}'::numeric[] else i.back_levels  end
         from changed c where i.id = c.id
         returning i.id
       )
@@ -268,11 +285,65 @@ export async function setCount(itemId: number, loc: Loc, value: number): Promise
         update items set
           store = case when ${loc}::text = 'store' then ${v} else store end,
           patio = case when ${loc}::text = 'patio' then ${v} else patio end,
-          back  = case when ${loc}::text = 'back'  then ${v} else back  end
+          back  = case when ${loc}::text = 'back'  then ${v} else back  end,
+          -- A plain total overrides whatever the bottle breakdown said, and
+          -- nothing here says how that total splits across bottles - so the
+          -- breakdown is dropped rather than left stale. Same everywhere
+          -- below: only countBarBottles() can establish one.
+          patio_levels = case when ${loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+          back_levels  = case when ${loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
         where id = ${itemId} and not archived returning id
       )
       insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
       select 'count', prev.id, prev.name, prev.cat, ${loc}::text, prev.v, ${v}, ${u.id}, ${u.name}
+      from prev join upd on upd.id = prev.id
+      returning id`;
+
+    if (!rows.length) throw new Error("That bottle is no longer in the list.");
+    refresh();
+  });
+}
+
+/**
+ * Count a bar bottle by bottle.
+ *
+ * A bar can have several open bottles of the same thing at different levels;
+ * adding them up in your head at the bar is where counts go wrong, and the
+ * total alone can't tell you three bottles are open. The levels are stored
+ * alongside the total, which the database computes from them so the two can
+ * never disagree.
+ *
+ * Logged as an ordinary 'count' move, so undo, the activity log and the
+ * report's variance figures all keep working untouched.
+ */
+export async function countBarBottles(
+  itemId: number, loc: Loc, levels: number[]
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (loc !== "patio" && loc !== "back") throw new Error("Only the bars are counted bottle by bottle");
+    if (!Array.isArray(levels)) throw new Error("Enter at least one bottle");
+    if (levels.length > 60) throw new Error("That's more open bottles than a bar can hold");
+
+    // An empty row is "no bottle", not a zero - drop it before validating.
+    const clean = levels.map((n) => partial(n, "Bottle level")).filter((n) => n > 0);
+    for (const n of clean) if (n > 1) throw new Error("A bottle can't be more than full - use one row per bottle");
+    const total = Math.round(clean.reduce((a, n) => a + n, 0) * 100) / 100;
+
+    const rows = await sql`
+      with prev as (
+        select id, name, cat, case when ${loc}::text = 'patio' then patio else back end as v
+        from items where id = ${itemId} and not archived
+      ), upd as (
+        update items set
+          patio        = case when ${loc}::text = 'patio' then ${total}::numeric else patio end,
+          back         = case when ${loc}::text = 'back'  then ${total}::numeric else back  end,
+          patio_levels = case when ${loc}::text = 'patio' then ${clean}::numeric[] else patio_levels end,
+          back_levels  = case when ${loc}::text = 'back'  then ${clean}::numeric[] else back_levels  end
+        where id = ${itemId} and not archived returning id
+      )
+      insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
+      select 'count', prev.id, prev.name, prev.cat, ${loc}::text, prev.v, ${total}, ${u.id}, ${u.name}
       from prev join upd on upd.id = prev.id
       returning id`;
 
@@ -299,7 +370,9 @@ export async function logWaste(
         update items set
           store = store - case when ${loc}::text = 'store' then ${q}::numeric else 0 end,
           patio = patio - case when ${loc}::text = 'patio' then ${q}::numeric else 0 end,
-          back  = back  - case when ${loc}::text = 'back'  then ${q}::numeric else 0 end
+          back  = back  - case when ${loc}::text = 'back'  then ${q}::numeric else 0 end,
+          patio_levels = case when ${loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+          back_levels  = case when ${loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
         where id = ${itemId} and not archived and
           (case ${loc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
         returning id
@@ -337,7 +410,14 @@ export async function transferBar(
           patio = patio - case when ${fromLoc}::text = 'patio' then ${q}::numeric else 0 end
                         + case when ${toLoc}::text   = 'patio' then ${q}::numeric else 0 end,
           back  = back  - case when ${fromLoc}::text = 'back'  then ${q}::numeric else 0 end
-                        + case when ${toLoc}::text   = 'back'  then ${q}::numeric else 0 end
+                        + case when ${toLoc}::text   = 'back'  then ${q}::numeric else 0 end,
+          -- Which physical bottle a partial transfer came out of (or landed
+          -- in) isn't recorded, so any bar either end of it loses its
+          -- breakdown until the next count.
+          patio_levels = case when 'patio' in (${fromLoc}::text, ${toLoc}::text)
+                              then '{}'::numeric[] else patio_levels end,
+          back_levels  = case when 'back'  in (${fromLoc}::text, ${toLoc}::text)
+                              then '{}'::numeric[] else back_levels end
         where id = ${itemId} and not archived and
           (case ${fromLoc}::text when 'store' then store when 'patio' then patio else back end) >= ${q}
         returning id
@@ -407,6 +487,19 @@ export async function undoMove(moveId: number): Promise<Result> {
           back  = case when ${m.loc}::text = 'back'  then ${m.from_val} else back  end
         where id = ${m.item_id}`;
     }
+
+    // Reversing a bar's total says nothing about how it splits across
+    // bottles - even undoing a bottle-by-bottle count only restores the
+    // scalar - so any bar this move touched loses its breakdown. Done once
+    // here rather than in all five branches above.
+    await sql`
+      update items set
+        patio_levels = case when 'patio' in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
+                            then '{}'::numeric[] else patio_levels end,
+        back_levels  = case when 'back'  in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
+                            then '{}'::numeric[] else back_levels end
+      where id = ${m.item_id}`;
+
     await sql`delete from moves where id = ${moveId}`;
     refresh();
   });

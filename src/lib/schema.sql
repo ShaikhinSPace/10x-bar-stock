@@ -42,6 +42,19 @@ create table if not exists items (
 -- equivalent of that.)
 alter table items add column if not exists ignore_reorder boolean not null default false;
 
+-- A bar can hold several open bottles of the same thing at different levels
+-- (a full one, a half, a quarter). Summing those into one number is what the
+-- scalar patio/back columns do, and it loses the fact that three bottles are
+-- open - which is exactly what an owner wants to see. These hold the levels
+-- of the individual bottles, newest count wins.
+--
+-- The scalars stay authoritative for all stock arithmetic so nothing else
+-- has to change; these are the breakdown behind that number, and
+-- setBarLevels()/countBar() write both together in one statement. Store is
+-- whole unopened bottles only, so it has no equivalent.
+alter table items add column if not exists patio_levels numeric(10,2)[] not null default '{}';
+alter table items add column if not exists back_levels  numeric(10,2)[] not null default '{}';
+
 -- Existing databases created items with the old inline CHECK before
 -- categories existed - drop it and swap in the real foreign key. Named and
 -- dropped explicitly (like moves_type_check below) so this stays safe to

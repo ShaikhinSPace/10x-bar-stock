@@ -20,7 +20,24 @@ export type Item = {
   id: number; name: string; cat: Cat;
   store: number; patio: number; back: number; rl: number;
   ignore_reorder: boolean;
+  /**
+   * The individual open bottles behind the patio/back totals, e.g. [1, 0.75,
+   * 0.25] for "three open, two bottles' worth". Empty means nobody has
+   * counted this item at that bar bottle-by-bottle yet - the scalar is still
+   * the truth either way.
+   */
+  patio_levels: number[]; back_levels: number[];
 };
+
+/** The bottle-level breakdown for a bar. Store holds unopened bottles only. */
+export const levelsAt = (i: Item, loc: Loc): number[] =>
+  loc === "patio" ? i.patio_levels : loc === "back" ? i.back_levels : [];
+
+/** "3 open · 2" — only when a bottle-by-bottle count actually happened. */
+export function openLabel(i: Item, loc: Loc): string | null {
+  const levels = levelsAt(i, loc).filter((n) => n > 0);
+  return levels.length ? `${levels.length} open` : null;
+}
 
 export type Move = {
   id: number; ts: string; type: "give" | "receive" | "count" | "waste" | "transfer";
