@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, inCat, levelsAt,
   needsReorder, openLabel,
@@ -8,56 +8,16 @@ import {
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, countBarBottles, editItem, giveOut, logWaste, logout, receive,
+  addItem, addUser, archiveItem, countBarBottles, editItem, giveOut, logWaste, receive,
   submitStocktake,
   receiveDelivery, setCount, setReorderIgnore, setReorderLevel, setUserActive, transferBar, undoMove,
   type Result,
 } from "./actions";
+import { useAction } from "./(app)/shell";
 
-type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
 type SheetAct = "give" | "receive" | "transfer" | "waste" | "count" | "edit";
 
 const DAY = 864e5;
-
-
-/* ============================ icons ============================ */
-
-const NAV_ICON: Record<Tab, React.ReactNode> = {
-  dashboard: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <rect x="3" y="3" width="8" height="9" rx="1.5" />
-      <rect x="13" y="3" width="8" height="5" rx="1.5" />
-      <rect x="13" y="11" width="8" height="10" rx="1.5" />
-      <rect x="3" y="15" width="8" height="6" rx="1.5" />
-    </svg>
-  ),
-  stock: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M4 7h16M4 12h16M4 17h16" strokeLinecap="round" />
-    </svg>
-  ),
-  delivery: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M3 8.5 12 4l9 4.5v7L12 20l-9-4.5z" strokeLinejoin="round" />
-      <path d="M3 8.5 12 13l9-4.5M12 13v7" strokeLinejoin="round" />
-    </svg>
-  ),
-  activity: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M12 8v4l3 2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  ),
-  manage: (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-      <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
-      <path
-        d="M19 12a7 7 0 0 0-.1-1.2l2-1.6-2-3.4-2.4 1a7 7 0 0 0-2-1.2L14 2h-4l-.5 2.6a7 7 0 0 0-2 1.2l-2.4-1-2 3.4 2 1.6A7 7 0 0 0 5 12a7 7 0 0 0 .1 1.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 2 1.2L10 22h4l.5-2.6a7 7 0 0 0 2-1.2l2.4 1 2-3.4-2-1.6A7 7 0 0 0 19 12z"
-        strokeLinejoin="round"
-      />
-    </svg>
-  ),
-};
 
 const LOC_ICON: Record<Loc, React.ReactNode> = {
   store: (
@@ -142,138 +102,16 @@ function dayKey(ts: number, now: number) {
 const timeStr = (ts: number) =>
   new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 
-/* ============================ shell ============================ */
-
-export function App({
-  user, items, moves, recent, staff, deliveries, now, initialTab = "dashboard",
-}: {
-  user: SessionUser; items: Item[]; moves: Move[]; recent: Move[]; staff: Staff[];
-  deliveries: Booked[]; now: number; initialTab?: Tab;
-}) {
-  const [tab, setTab] = useState<Tab>(initialTab);
-  const [sheetId, setSheetId] = useState<number | null>(null);
-  const [toast, setToast] = useState<{ msg: string; error?: boolean; moveId?: number } | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => {
-    if (!toast) return;
-    if (timer.current) clearTimeout(timer.current);
-    timer.current = setTimeout(() => setToast(null), toast.moveId ? 6000 : 3000);
-    return () => { if (timer.current) clearTimeout(timer.current); };
-  }, [toast]);
-
-  /** Runs a server action, then either closes the sheet or shows why it failed. */
-  function run(fn: () => Promise<Result>, okMsg: string, closeSheet = true) {
-    startTransition(async () => {
-      const r = await fn();
-      if (r.ok) {
-        if (closeSheet) setSheetId(null);
-        setToast({ msg: okMsg, moveId: r.moveId });
-      } else {
-        setToast({ msg: r.error, error: true });
-      }
-    });
-  }
-
-  const tabs: Tab[] = user.role === "owner"
-    ? ["dashboard", "stock", "delivery", "activity", "manage"]
-    : ["dashboard", "stock", "delivery", "activity"];
-
-  const nav = (
-    <>
-      {tabs.map((t) => (
-        <button key={t} className={t === tab ? "on" : ""} onClick={() => { setTab(t); window.scrollTo(0, 0); }}>
-          {NAV_ICON[t]}
-          {cap(t)}
-        </button>
-      ))}
-    </>
-  );
-
-  const sheetItem = sheetId === null ? null : items.find((i) => i.id === sheetId) ?? null;
-
-  const brand = (
-    <div className="brand">
-      <span className="mark">10<b>X</b> Bar</span>
-      <span className="sub">Stock control</span>
-    </div>
-  );
-
-  return (
-    <>
-      <h2 className="sr-only">10X Bar stock control</h2>
-
-      <div className="app">
-        <aside className="sidebar">
-          {brand}
-          <div className="snav">{nav}</div>
-          <div className="foot">Store counts whole bottles · bars count partials</div>
-        </aside>
-
-        <div className="content">
-          <div className="topbar">{brand}</div>
-          <main className="wrap">
-            <div className="whoami">
-              <span className="nm">Signed in as {user.name}</span>
-              <span className="role">{user.role}</span>
-              <button onClick={() => logout()}>Sign out</button>
-            </div>
-
-            {tab === "dashboard" && <Dashboard items={items} moves={recent} now={now} onPick={setSheetId}
-                user={user} pending={pending} run={run} />}
-            {tab === "stock" && <Stock items={items} moves={recent} now={now} user={user} pending={pending} run={run}
-                onPick={setSheetId} />}
-            {tab === "delivery" && <Delivery items={items} deliveries={deliveries} run={run} pending={pending} />}
-            {tab === "activity" && (
-              <Activity moves={moves} user={user} now={now} onToast={setToast}
-                onUndo={(id) => run(() => undoMove(id), "Entry undone", false)} />
-            )}
-            {tab === "manage" && user.role === "owner" && (
-              <Manage items={items} staff={staff} user={user} run={run} pending={pending} />
-            )}
-          </main>
-        </div>
-      </div>
-
-      <nav className="mnav"><div className="mnav-in">{nav}</div></nav>
-
-      <div className={`scrim${sheetItem ? " show" : ""}`} onClick={() => setSheetId(null)} />
-      <div className={`sheet${sheetItem ? " show" : ""}`}>
-        {sheetItem && (
-          <Sheet key={sheetItem.id} item={sheetItem} pending={pending} run={run}
-            canEdit={user.role === "owner"} onClose={() => setSheetId(null)} />
-        )}
-      </div>
-
-      {toast && (
-        <div className="toast show" role="status" aria-live={toast.error ? "assertive" : "polite"}
-          style={toast.error ? { borderColor: "var(--red)" } : undefined}>
-          <span className="tx">{toast.msg}</span>
-          {toast.moveId !== undefined && (
-            <button className="undo" onClick={() => {
-              const id = toast.moveId!;
-              setToast(null);
-              run(() => undoMove(id), "Entry undone", false);
-            }}>
-              Undo
-            </button>
-          )}
-        </div>
-      )}
-    </>
-  );
-}
-
 /* ============================ dashboard ============================ */
 
-function Dashboard({
-  items, moves, now, onPick, user, pending, run,
+export function Dashboard({
+  items, moves, now, user,
 }: {
-  items: Item[]; moves: Move[]; now: number; onPick: (id: number) => void;
-  user: SessionUser; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  items: Item[]; moves: Move[]; now: number; user: SessionUser;
 }) {
+  const { pending, run } = useAction();
+  const [sheetId, setSheetId] = useState<number | null>(null);
+
   const since = now - 7 * DAY;
   const storeTot = sumAt(items, "store");
   const patioTot = sumAt(items, "patio");
@@ -322,7 +160,7 @@ function Dashboard({
           </div>
         </div>
 
-        <ReorderTable rows={reorder} onPick={onPick} canIgnore={user.role === "owner"} pending={pending} run={run} />
+        <ReorderTable rows={reorder} onPick={setSheetId} canIgnore={user.role === "owner"} pending={pending} run={run} />
 
         <CategoryCard items={items} />
         <TrendCard moves={moves} now={now} />
@@ -334,6 +172,9 @@ function Dashboard({
           <TopMoversCard moves={moves} now={now} />
         </div>
       </div>
+
+      <BottleSheet items={items} id={sheetId} canEdit={user.role === "owner"}
+        onClose={() => setSheetId(null)} />
     </>
   );
 }
@@ -383,7 +224,7 @@ function ReorderTable({
   rows, onPick, canIgnore, pending, run,
 }: {
   rows: Item[]; onPick: (id: number) => void; canIgnore: boolean; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  run: (fn: () => Promise<Result>, ok: string, onOk?: () => void) => void;
 }) {
   const { sort, toggle } = useColumnSort<ReorderSortKey>();
   const shown = sortRows(rows, sort, (i, key) =>
@@ -435,7 +276,7 @@ function ReorderTable({
                           aria-label={`Ignore reorder alerts for ${i.name}`}
                           onClick={(e) => {
                             e.stopPropagation();
-                            run(() => setReorderIgnore(i.id, true), `${i.name} won't raise reorder alerts anymore`, false);
+                            run(() => setReorderIgnore(i.id, true), `${i.name} won't raise reorder alerts anymore`);
                           }}>
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                             <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
@@ -648,13 +489,13 @@ function ScannerModal({
 /* ============================ stock ============================ */
 
 
-function Stock({
-  items, moves, now, user, pending, run, onPick,
+export function Stock({
+  items, moves, now, user,
 }: {
-  items: Item[]; moves: Move[]; now: number; user: SessionUser; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
-  onPick: (id: number) => void;
+  items: Item[]; moves: Move[]; now: number; user: SessionUser;
 }) {
+  const [sheetId, setSheetId] = useState<number | null>(null);
+  const onPick = setSheetId;
   const [loc, setLoc] = useState<Loc>("store");
   const [counting, setCounting] = useState(false);
   const [cat, setCat] = useState<string>("ALL");
@@ -699,8 +540,7 @@ function Stock({
 
   if (counting) {
     return (
-      <Stocktake items={items} loc={loc} user={user} pending={pending} run={run}
-        onClose={() => setCounting(false)} />
+      <Stocktake items={items} loc={loc} user={user} onClose={() => setCounting(false)} />
     );
   }
 
@@ -802,6 +642,9 @@ function Stock({
           );
         })}
       </div>
+
+      <BottleSheet items={items} id={sheetId} canEdit={user.role === "owner"}
+        onClose={() => setSheetId(null)} />
     </>
   );
 }
@@ -819,11 +662,11 @@ function Stock({
  * counts, and only a typed value that differs from expected is written.
  */
 function Stocktake({
-  items, loc, user, onClose, run, pending,
+  items, loc, user, onClose,
 }: {
-  items: Item[]; loc: Loc; user: SessionUser; onClose: () => void; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  items: Item[]; loc: Loc; user: SessionUser; onClose: () => void;
 }) {
+  const { pending, run } = useAction();
   useEscapeClose(onClose);
   const draftKey = `stocktake:${loc}:${user.id}`;
 
@@ -870,7 +713,6 @@ function Stocktake({
     run(
       () => submitStocktake(loc, variances.map((r) => ({ itemId: r.id, value: r.value }))),
       `${LOC_SHORT[loc]} stocktake saved — ${variances.length} correction${variances.length === 1 ? "" : "s"}`,
-      false
     );
     setCounts({});
     try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
@@ -967,13 +809,38 @@ function Stocktake({
 
 /* ============================ item sheet ============================ */
 
-function Sheet({
-  item, pending, run, canEdit, onClose,
+/**
+ * The bottle sheet and its scrim. Lives with whichever tab can open one, so the
+ * item it shows always comes from that route's own freshly rendered `items` -
+ * a give logged from here re-renders the page and the numbers follow.
+ */
+function BottleSheet({
+  items, id, canEdit, onClose,
 }: {
-  item: Item; pending: boolean; canEdit: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
-  onClose: () => void;
+  items: Item[]; id: number | null; canEdit: boolean; onClose: () => void;
 }) {
+  const item = id === null ? null : items.find((i) => i.id === id) ?? null;
+  return (
+    <>
+      <div className={`scrim${item ? " show" : ""}`} onClick={onClose} />
+      <div className={`sheet${item ? " show" : ""}`}>
+        {item && <Sheet key={item.id} item={item} canEdit={canEdit} onClose={onClose} />}
+      </div>
+    </>
+  );
+}
+
+function Sheet({
+  item, canEdit, onClose,
+}: {
+  item: Item; canEdit: boolean; onClose: () => void;
+}) {
+  const { pending, run: runAction } = useAction();
+  // Every commit in here closes the sheet once it succeeds. That used to ride on
+  // run()'s old default; it is stated once here instead of at all seven buttons.
+  const run = (fn: () => Promise<Result>, ok: string, onOk: () => void = onClose) =>
+    runAction(fn, ok, onOk);
+
   useEscapeClose(onClose);
   const [act, setAct] = useState<SheetAct>("give");
 
@@ -1393,12 +1260,12 @@ function QtyPicker({
  * time through the Stock sheet is slow enough that people skip it, so this is a
  * draft basket: search, add lines, then book the whole thing in one action.
  */
-function Delivery({
-  items, deliveries, run, pending,
+export function Delivery({
+  items, deliveries,
 }: {
-  items: Item[]; deliveries: Booked[]; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  items: Item[]; deliveries: Booked[];
 }) {
+  const { pending, run } = useAction();
   const [lines, setLines] = useState<Map<number, number>>(new Map());
   const [q, setQ] = useState("");
   const [invoice, setInvoice] = useState("");
@@ -1435,7 +1302,6 @@ function Delivery({
     run(
       () => receiveDelivery(payload, invoice, supplier),
       `Delivery booked — ${totalBottles} bottles across ${drafted.length} item${drafted.length === 1 ? "" : "s"}`,
-      false
     );
     setLines(new Map());
     setInvoice("");
@@ -1578,13 +1444,14 @@ function Delivery({
 
 /* ============================ activity ============================ */
 
-function Activity({
-  moves, user, now, onUndo, onToast,
+export function Activity({
+  moves, user, now,
 }: {
   moves: Move[]; user: SessionUser; now: number;
-  onUndo: (id: number) => void;
-  onToast: (t: { msg: string; error?: boolean }) => void;
 }) {
+  const { run, say } = useAction();
+  const onUndo = (id: number) => run(() => undoMove(id), "Entry undone");
+  const onToast = (t: { msg: string; error?: boolean }) => say(t.msg, t.error);
   const [filter, setFilter] = useState<string>("ALL");
 
   const filtered = useMemo(() => {
@@ -1777,12 +1644,12 @@ function usePopoverClose(active: boolean, onClose: () => void) {
 
 type ManageSortKey = "name" | "cat" | "store" | "patio" | "back" | "rl";
 
-function Manage({
-  items, staff, user, run, pending,
+export function Manage({
+  items, staff, user,
 }: {
-  items: Item[]; staff: Staff[]; user: SessionUser; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  items: Item[]; staff: Staff[]; user: SessionUser;
 }) {
+  const { pending, run } = useAction();
   const [name, setName] = useState("");
   const [cat, setCat] = useState<Cat>("WHISKEY");
   const [store, setStore] = useState("0");
@@ -1828,7 +1695,7 @@ function Manage({
         <form className="frm" onSubmit={(e) => {
           e.preventDefault();
           if (pending) return;
-          run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`, false);
+          run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`);
         }}>
           <div className="fld">
             <label>Name</label>
@@ -1884,7 +1751,7 @@ function Manage({
                 <form className="frm" onSubmit={(e) => {
                   e.preventDefault();
                   if (pending) return;
-                  run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`, false);
+                  run(() => addUser(uUser, uName, uPass, uRole), `Added ${uName.trim()}`);
                   setUPass("");
                 }}>
                   <div className="frow">
@@ -1933,7 +1800,7 @@ function Manage({
             {s.id !== user.id && (
               <button className="toggle"
                 onClick={() => run(() => setUserActive(s.id, !s.active),
-                  s.active ? `${s.name} disabled` : `${s.name} re-enabled`, false)}>
+                  s.active ? `${s.name} disabled` : `${s.name} re-enabled`)}>
                 {s.active ? "Disable" : "Enable"}
               </button>
             )}
@@ -2000,7 +1867,7 @@ function Manage({
 /** One editable bottle - shared by the Manage card and the full-list view. */
 function BottleRow({ i, run }: {
   i: Item;
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  run: (fn: () => Promise<Result>, ok: string, onOk?: () => void) => void;
 }) {
   return (
     <div className="mrow">
@@ -2018,7 +1885,7 @@ function BottleRow({ i, run }: {
         <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
           onBlur={(e) => {
             const v = Number(e.target.value);
-            if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`, false);
+            if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`);
           }} />
       </div>
       <button className={`rignore${i.ignore_reorder ? " on" : ""}`}
@@ -2027,7 +1894,6 @@ function BottleRow({ i, run }: {
         onClick={() => run(
           () => setReorderIgnore(i.id, !i.ignore_reorder),
           i.ignore_reorder ? `${i.name} reorder alerts back on` : `${i.name} won't raise reorder alerts anymore`,
-          false
         )}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
@@ -2036,7 +1902,7 @@ function BottleRow({ i, run }: {
       </button>
       <button className="del" aria-label={`Remove ${i.name}`} onClick={() => {
         if (confirm(`Remove "${i.name}" from the list? Its past activity stays in the log.`)) {
-          run(() => archiveItem(i.id), "Bottle removed", false);
+          run(() => archiveItem(i.id), "Bottle removed");
         }
       }}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -2088,7 +1954,7 @@ function BottleSortChips({ sort, toggle }: {
  */
 function AllBottlesView({ items, run, onClose }: {
   items: Item[];
-  run: (fn: () => Promise<Result>, ok: string, closeSheet?: boolean) => void;
+  run: (fn: () => Promise<Result>, ok: string, onOk?: () => void) => void;
   onClose: () => void;
 }) {
   useEscapeClose(onClose);
