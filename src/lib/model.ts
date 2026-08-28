@@ -69,6 +69,31 @@ export const WASTAGE_REASONS = [
 ] as const;
 export type WastageReason = (typeof WASTAGE_REASONS)[number];
 
+/**
+ * Which moves undo will actually accept, mirroring undoMove's rule so a link is
+ * never offered on something that would then be refused.
+ *
+ * give/receive/waste/transfer are deltas and deltas commute, so one stays undoable
+ * until its bottle is counted. A count sets an absolute figure, so it only reverses
+ * while nothing else has touched that bottle since.
+ *
+ * `moves` must be newest-first and must not be filtered by type — a count hidden by
+ * a filter still has to freeze the gives underneath it. Any window works as long as
+ * it is complete: anything logged after a move in the window is also in the window.
+ */
+export function undoableMoveIds(moves: Move[]): Set<number> {
+  const ok = new Set<number>();
+  const countedSince = new Set<number>();
+  const touchedSince = new Set<number>();
+  for (const m of moves) {
+    const isCount = m.type === "count";
+    if (isCount ? !touchedSince.has(m.item_id) : !countedSince.has(m.item_id)) ok.add(m.id);
+    if (isCount) countedSince.add(m.item_id);
+    touchedSince.add(m.item_id);
+  }
+  return ok;
+}
+
 /** A booked delivery, rebuilt from the moves that share one batch id. */
 export type Delivery = {
   batch: string; invoice: string; supplier: string | null;

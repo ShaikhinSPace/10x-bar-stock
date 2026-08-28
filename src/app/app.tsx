@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, inCat, levelsAt,
-  needsReorder, openLabel,
+  needsReorder, openLabel, undoableMoveIds,
   type Cat, type Delivery as Booked, type DeliveryLine, type Item, type Loc, type Move,
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
@@ -173,7 +173,7 @@ export function Dashboard({
         </div>
       </div>
 
-      <BottleSheet items={items} id={sheetId} canEdit={user.role === "owner"}
+      <BottleSheet items={items} moves={moves} id={sheetId} user={user}
         onClose={() => setSheetId(null)} />
     </>
   );
@@ -643,7 +643,7 @@ export function Stock({
         })}
       </div>
 
-      <BottleSheet items={items} id={sheetId} canEdit={user.role === "owner"}
+      <BottleSheet items={items} moves={moves} id={sheetId} user={user}
         onClose={() => setSheetId(null)} />
     </>
   );
@@ -815,25 +815,37 @@ function Stocktake({
  * a give logged from here re-renders the page and the numbers follow.
  */
 function BottleSheet({
-  items, id, canEdit, onClose,
+  items, moves, id, user, onClose,
 }: {
-  items: Item[]; id: number | null; canEdit: boolean; onClose: () => void;
+  items: Item[]; moves: Move[]; id: number | null; user: SessionUser; onClose: () => void;
 }) {
   const item = id === null ? null : items.find((i) => i.id === id) ?? null;
+  // Undoability is judged across every bottle, then narrowed to this one: the rule
+  // only ever depends on what happened to the same bottle, but it has to be computed
+  // before filtering so nothing that blocks an undo gets dropped first.
+  const undoable = useMemo(() => undoableMoveIds(moves), [moves]);
+  const mine = useMemo(
+    () => (item ? moves.filter((m) => m.item_id === item.id) : []),
+    [moves, item]
+  );
   return (
     <>
       <div className={`scrim${item ? " show" : ""}`} onClick={onClose} />
       <div className={`sheet${item ? " show" : ""}`}>
-        {item && <Sheet key={item.id} item={item} canEdit={canEdit} onClose={onClose} />}
+        {item && (
+          <Sheet key={item.id} item={item} recent={mine} undoable={undoable} user={user}
+            canEdit={user.role === "owner"} onClose={onClose} />
+        )}
       </div>
     </>
   );
 }
 
 function Sheet({
-  item, canEdit, onClose,
+  item, recent, undoable, user, canEdit, onClose,
 }: {
-  item: Item; canEdit: boolean; onClose: () => void;
+  item: Item; recent: Move[]; undoable: Set<number>; user: SessionUser;
+  canEdit: boolean; onClose: () => void;
 }) {
   const { pending, run: runAction } = useAction();
   // Every commit in here closes the sheet once it succeeds. That used to ride on
@@ -1173,6 +1185,65 @@ function Sheet({
           </button>
         </div>
       )}
+
+      <RecentOnBottle recent={recent} undoable={undoable} user={user}
+        pending={pending} onUndo={(id) => runAction(() => undoMove(id), "Entry undone")} />
+    </div>
+  );
+}
+
+/**
+ * The last few moves on this bottle, with undo where it will work.
+ *
+ * This is the tap-again path: mis-hit Give instead of Count in a rush and the fix is
+ * on the bottle you just mis-hit, rather than a six-second toast or a hunt through
+ * the whole activity log.
+ */
+function RecentOnBottle({
+  recent, undoable, user, pending, onUndo,
+}: {
+  recent: Move[]; undoable: Set<number>; user: SessionUser;
+  pending: boolean; onUndo: (id: number) => void;
+}) {
+  const shown = recent.slice(0, 4);
+  if (!shown.length) return null;
+
+  return (
+    <div className="rcb">
+      <div className="rcb-h">Recent on this bottle</div>
+      {shown.map((m) => {
+        const allowed = undoable.has(m.id);
+        const canUndo = allowed && (user.role === "owner" || m.user_name === user.name);
+        // Only explain a rule that blocked it. "Not your entry" needs no label -
+        // the barback cannot act on it either way and the reason is obvious.
+        const locked = allowed ? null
+          : m.type === "count" ? "newer entries" : "counted since";
+        const what = m.type === "give" ? `Gave ${fmtQty(m.cat, m.qty ?? 0)} to ${LOC_SHORT[m.loc!]}`
+          : m.type === "receive" ? `Received ${fmtQty(m.cat, m.qty ?? 0)}${m.batch ? " (delivery)" : ""}`
+          : m.type === "waste" ? `Wasted ${fmtQty(m.cat, m.qty ?? 0)} off ${LOC_SHORT[m.loc!]}`
+          : m.type === "transfer"
+            ? `Moved ${fmtQty(m.cat, m.qty ?? 0)} ${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
+            : `Counted ${LOC_SHORT[m.loc!]} to ${fmtQty(m.cat, m.to_val ?? 0)}`;
+        return (
+          <div className="rcb-r" key={m.id}>
+            <div className="rcb-t">
+              <span className="w">{what}</span>
+              <span className="b">{timeStr(+new Date(m.ts))} · {m.user_name}</span>
+            </div>
+            {canUndo && (
+              <button className="rcb-u" disabled={pending} onClick={() => onUndo(m.id)}>
+                Undo
+              </button>
+            )}
+            {locked && (
+              <span className="rcb-l"
+                title="A later count is now the truth for this bottle — correct it with another Count">
+                {locked}
+              </span>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -1522,30 +1593,9 @@ export function Activity({
     return moves.filter((m) => m.type.toUpperCase() === filter);
   }, [moves, filter]);
 
-  /**
-   * Which entries undoMove will actually accept, mirroring its rule so the link
-   * never appears on something that would then be refused.
-   *
-   * Deltas (give/receive/waste/transfer) commute, so one stays undoable until the
-   * bottle is counted. A count sets an absolute figure, so it only reverses while
-   * nothing else has touched that bottle since.
-   *
-   * Built from the whole log rather than the filtered view - a count hidden behind
-   * the "Give" filter still blocks the gives underneath it.
-   */
-  const undoable = useMemo(() => {
-    const ok = new Set<number>();
-    const countedSince = new Set<number>();
-    const touchedSince = new Set<number>();
-    for (const m of moves) { // newest first
-      const isCount = m.type === "count";
-      const clear = isCount ? !touchedSince.has(m.item_id) : !countedSince.has(m.item_id);
-      if (clear) ok.add(m.id);
-      if (isCount) countedSince.add(m.item_id);
-      touchedSince.add(m.item_id);
-    }
-    return ok;
-  }, [moves]);
+  // From the whole log, not `filtered` - a count hidden behind the "Give" filter
+  // still has to freeze the gives underneath it.
+  const undoable = useMemo(() => undoableMoveIds(moves), [moves]);
 
   function copyCSV() {
     const rows: (string | number)[][] = [
