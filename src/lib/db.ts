@@ -90,9 +90,10 @@ const toMove = (r: Row): Move => ({
 export async function getDeliveries(limit = 100): Promise<Delivery[]> {
   const rows = await sql`
     select batch, invoice, supplier,
-           min(ts) as ts, min(user_name) as user_name,
+           min(ts) as ts, min(user_name) as user_name, min(user_id) as user_id,
            sum(qty) as bottles,
-           json_agg(json_build_object('item', item_name, 'cat', cat, 'qty', qty)
+           json_agg(json_build_object(
+                      'item_id', item_id, 'item', item_name, 'cat', cat, 'qty', qty)
                     order by item_name) as lines
     from moves
     where batch is not null
@@ -102,8 +103,9 @@ export async function getDeliveries(limit = 100): Promise<Delivery[]> {
   return rows.map((r) => ({
     batch: r.batch, invoice: r.invoice ?? "—", supplier: r.supplier,
     ts: new Date(r.ts).toISOString(), user_name: r.user_name,
+    user_id: r.user_id === null ? null : Number(r.user_id),
     bottles: Number(r.bottles),
-    lines: (r.lines as { item: string; cat: Item["cat"]; qty: string }[])
-      .map((l) => ({ item: l.item, cat: l.cat, qty: Number(l.qty) })),
+    lines: (r.lines as { item_id: number; item: string; cat: Item["cat"]; qty: string }[])
+      .map((l) => ({ item_id: Number(l.item_id), item: l.item, cat: l.cat, qty: Number(l.qty) })),
   }));
 }

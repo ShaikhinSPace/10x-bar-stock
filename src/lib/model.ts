@@ -72,8 +72,9 @@ export type WastageReason = (typeof WASTAGE_REASONS)[number];
 /** A booked delivery, rebuilt from the moves that share one batch id. */
 export type Delivery = {
   batch: string; invoice: string; supplier: string | null;
-  ts: string; user_name: string; bottles: number;
-  lines: { item: string; cat: Cat; qty: number }[];
+  ts: string; user_name: string; user_id: number | null; bottles: number;
+  // item_id is what lets a booked delivery be loaded back into the editor.
+  lines: { item_id: number; item: string; cat: Cat; qty: number }[];
 };
 
 /** One line of a delivery being drafted on the Delivery tab. */

@@ -8,7 +8,7 @@ import {
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, countBarBottles, editItem, giveOut, logWaste, receive,
+  addItem, addUser, archiveItem, countBarBottles, editDelivery, editItem, giveOut, logWaste, receive,
   submitStocktake,
   receiveDelivery, setCount, setReorderIgnore, setReorderLevel, setUserActive, transferBar, undoMove,
   type Result,
@@ -1261,15 +1261,17 @@ function QtyPicker({
  * draft basket: search, add lines, then book the whole thing in one action.
  */
 export function Delivery({
-  items, deliveries,
+  items, deliveries, user,
 }: {
-  items: Item[]; deliveries: Booked[];
+  items: Item[]; deliveries: Booked[]; user: SessionUser;
 }) {
   const { pending, run } = useAction();
   const [lines, setLines] = useState<Map<number, number>>(new Map());
   const [q, setQ] = useState("");
   const [invoice, setInvoice] = useState("");
   const [supplier, setSupplier] = useState("");
+  // Non-null while correcting a booked delivery: same builder, different verb.
+  const [editing, setEditing] = useState<Booked | null>(null);
 
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
   const needle = q.trim().toLowerCase();
@@ -1282,6 +1284,9 @@ export function Delivery({
 
   const drafted = [...lines.entries()];
   const totalBottles = drafted.reduce((a, [, n]) => a + n, 0);
+  // What saving an edit would do to the storeroom overall: the new total minus what
+  // this delivery already put there. Zero when only the paperwork changed.
+  const netChange = editing ? totalBottles - editing.bottles : 0;
 
   const setQty = (id: number, n: number) =>
     setLines((prev) => {
@@ -1297,22 +1302,56 @@ export function Delivery({
     setQ("");
   };
 
-  function book() {
-    const payload: DeliveryLine[] = drafted.map(([itemId, qty]) => ({ itemId, qty }));
-    run(
-      () => receiveDelivery(payload, invoice, supplier),
-      `Delivery booked — ${totalBottles} bottles across ${drafted.length} item${drafted.length === 1 ? "" : "s"}`,
-    );
+  function reset() {
     setLines(new Map());
     setInvoice("");
     setSupplier("");
+    setEditing(null);
+    setQ("");
+  }
+
+  /** Load a booked delivery back into the builder above. */
+  function edit(d: Booked) {
+    setEditing(d);
+    setLines(new Map(d.lines.map((l) => [l.item_id, l.qty])));
+    setInvoice(d.invoice === "—" ? "" : d.invoice);
+    setSupplier(d.supplier ?? "");
+    setQ("");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function book() {
+    const payload: DeliveryLine[] = drafted.map(([itemId, qty]) => ({ itemId, qty }));
+    const noun = `${totalBottles} bottles across ${drafted.length} item${drafted.length === 1 ? "" : "s"}`;
+    // Only clear the form once it actually worked - a rejected edit (duplicate
+    // invoice, a bottle that would go negative) has to stay on screen to be fixed.
+    if (editing) {
+      run(() => editDelivery(editing.batch, payload, invoice, supplier),
+        `Delivery updated — ${noun}`, reset);
+    } else {
+      run(() => receiveDelivery(payload, invoice, supplier), `Delivery booked — ${noun}`, reset);
+    }
   }
 
   return (
     <>
-      <div className="ptitle">Delivery <span className="sub">book a whole drop at once</span></div>
+      <div className="ptitle">Delivery <span className="sub">
+        {editing ? "correcting a booked delivery" : "book a whole drop at once"}</span></div>
 
       <div className="card">
+        {editing && (
+          <div className="dedit">
+            <div className="det">
+              <b>Editing invoice {editing.invoice}</b>
+              <span>
+                booked {new Date(editing.ts).toLocaleDateString("en-US",
+                  { day: "numeric", month: "short", year: "numeric" })} by {editing.user_name}
+                {" · "}the storeroom moves by the difference, not the whole amount
+              </span>
+            </div>
+            <button className="decancel" onClick={reset} disabled={pending}>Cancel</button>
+          </div>
+        )}
         <div className="frow">
           <div className="fld">
             <label>Invoice # <span className="req">required</span></label>
@@ -1350,7 +1389,7 @@ export function Delivery({
 
       <div className="card">
         <div className="ch">
-          <h3>This delivery</h3>
+          <h3>{editing ? "Delivery lines" : "This delivery"}</h3>
           <span className={`badge${drafted.length ? " red" : ""}`}>{drafted.length}</span>
         </div>
 
@@ -1364,11 +1403,17 @@ export function Delivery({
               const it = byId.get(id);
               if (!it) return null;
               const step = it.cat === "BEER" ? 24 : 1;
+              // While editing, this line already contributed `was` to the storeroom,
+              // so the projection has to back that out before adding the new number.
+              const was = editing?.lines.find((l) => l.item_id === id)?.qty ?? 0;
               return (
                 <div className="dline" key={id}>
                   <div className="dl-nm">
                     <div className="t">{it.name}</div>
-                    <div className="s">{fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store + n)}</b></div>
+                    <div className="s">
+                      {fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store - was + n)}</b>
+                      {was > 0 && n !== was && <span className="dlwas"> was {fmtQty(it.cat, was)}</span>}
+                    </div>
                   </div>
                   <div className="dl-qty">
                     <button onClick={() => setQty(id, n - step)} aria-label={`Less ${it.name}`}>−</button>
@@ -1384,10 +1429,21 @@ export function Delivery({
             <div className="dfoot">
               <div className="dsum">
                 <b>{fmt(totalBottles)}</b> bottles · {drafted.length} item{drafted.length === 1 ? "" : "s"}
-                {!invoice.trim() && <div className="dwarn">Add the invoice number to book this</div>}
+                {editing && netChange !== 0 && (
+                  <div className="dnet">
+                    storeroom {netChange > 0 ? "+" : "−"}{fmt(Math.abs(netChange))} once saved
+                  </div>
+                )}
+                {!invoice.trim() && (
+                  <div className="dwarn">
+                    Add the invoice number to {editing ? "save this" : "book this"}
+                  </div>
+                )}
               </div>
               <button className="commit green" disabled={pending || !invoice.trim()} onClick={book}>
-                {pending ? "Booking…" : "Book delivery"}
+                {pending
+                  ? (editing ? "Saving…" : "Booking…")
+                  : (editing ? "Save changes" : "Book delivery")}
               </button>
             </div>
           </>
@@ -1405,7 +1461,7 @@ export function Delivery({
           </div>
         ) : (
           deliveries.map((d) => (
-            <details className="inv" key={d.batch}>
+            <details className={`inv${editing?.batch === d.batch ? " editing" : ""}`} key={d.batch}>
               <summary>
                 <span className="ino">{d.invoice}</span>
                 <span className="inmeta">
@@ -1431,7 +1487,14 @@ export function Delivery({
                   ))}
                 </div>
                 <div className="inby">
-                  {d.lines.length} item{d.lines.length === 1 ? "" : "s"} · booked by {d.user_name}
+                  <span>
+                    {d.lines.length} item{d.lines.length === 1 ? "" : "s"} · booked by {d.user_name}
+                  </span>
+                  {(user.role === "owner" || d.user_id === user.id) && (
+                    <button className="inedit" onClick={() => edit(d)} disabled={pending}>
+                      Edit delivery
+                    </button>
+                  )}
                 </div>
               </div>
             </details>
