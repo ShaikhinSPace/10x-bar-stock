@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { sql, CATS, LOCS, type Cat, type DeliveryLine, type Loc } from "@/lib/db";
 import { applyDeliveryEdit } from "@/lib/delivery-edit";
+import { applyUndo } from "@/lib/undo-move";
 import {
   endSession, hashPassword, requireOwner, requireUser, startSession, verifyPassword,
 } from "@/lib/auth";
@@ -507,8 +508,13 @@ export async function transferBar(
 }
 
 /**
- * Reverse a move. Only the newest move for that item can be undone — reversing an
- * older one would silently clobber whatever was logged after it.
+ * Reverse a move.
+ *
+ * Gives, receives, wastage and transfers are deltas, so an older one can still be
+ * pulled back out exactly — a mistake three entries ago is a mistake, not a reason
+ * to recount the bar. A count sets an absolute figure instead, so it blocks undoing
+ * anything underneath it and only reverses itself while nothing has touched that
+ * bottle since. The arithmetic and both guards live in @/lib/undo-move.
  */
 export async function undoMove(moveId: number): Promise<Result> {
   return attempt(async () => {
@@ -521,60 +527,23 @@ export async function undoMove(moveId: number): Promise<Result> {
       throw new Error("You can only undo your own entries.");
     }
 
-    const [newest] = await sql`
-      select id from moves where item_id = ${m.item_id} order by ts desc, id desc limit 1`;
-    if (Number(newest.id) !== Number(moveId)) {
+    // Shared with scripts/check-undo.mjs, which runs this exact logic against a
+    // real database — see the module for which moves can be reversed and why.
+    const refused = await applyUndo(sql, m as Parameters<typeof applyUndo>[1]);
+    if (refused?.reason === "counted") {
+      throw new Error(
+        "This bottle has been counted since, and the count is now the truth. "
+        + "Correct it with another Count."
+      );
+    }
+    if (refused?.reason === "superseded") {
       throw new Error("Something else was logged for this bottle since — use Count instead.");
     }
-
-    if (m.type === "give") {
-      await sql`
-        update items set
-          store = store + ${m.qty},
-          patio = patio - case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
-          back  = back  - case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-        where id = ${m.item_id}`;
-    } else if (m.type === "receive") {
-      await sql`update items set store = store - ${m.qty} where id = ${m.item_id}`;
-    } else if (m.type === "waste") {
-      await sql`
-        update items set
-          store = store + case when ${m.loc}::text = 'store' then ${m.qty}::numeric else 0 end,
-          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
-          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-        where id = ${m.item_id}`;
-    } else if (m.type === "transfer") {
-      await sql`
-        update items set
-          store = store + case when ${m.loc}::text = 'store' then ${m.qty}::numeric else 0 end
-                        - case when ${m.to_loc}::text = 'store' then ${m.qty}::numeric else 0 end,
-          patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end
-                        - case when ${m.to_loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
-          back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-                        - case when ${m.to_loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-        where id = ${m.item_id}`;
-    } else {
-      await sql`
-        update items set
-          store = case when ${m.loc}::text = 'store' then ${m.from_val} else store end,
-          patio = case when ${m.loc}::text = 'patio' then ${m.from_val} else patio end,
-          back  = case when ${m.loc}::text = 'back'  then ${m.from_val} else back  end
-        where id = ${m.item_id}`;
+    if (refused?.reason === "short") {
+      throw new Error(
+        "There isn't enough left to take back — the stock has moved on since. Use Count instead."
+      );
     }
-
-    // Reversing a bar's total says nothing about how it splits across
-    // bottles - even undoing a bottle-by-bottle count only restores the
-    // scalar - so any bar this move touched loses its breakdown. Done once
-    // here rather than in all five branches above.
-    await sql`
-      update items set
-        patio_levels = case when 'patio' in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
-                            then '{}'::numeric[] else patio_levels end,
-        back_levels  = case when 'back'  in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
-                            then '{}'::numeric[] else back_levels end
-      where id = ${m.item_id}`;
-
-    await sql`delete from moves where id = ${moveId}`;
     refresh();
   });
 }

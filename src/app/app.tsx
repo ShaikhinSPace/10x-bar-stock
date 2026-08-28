@@ -1522,6 +1522,31 @@ export function Activity({
     return moves.filter((m) => m.type.toUpperCase() === filter);
   }, [moves, filter]);
 
+  /**
+   * Which entries undoMove will actually accept, mirroring its rule so the link
+   * never appears on something that would then be refused.
+   *
+   * Deltas (give/receive/waste/transfer) commute, so one stays undoable until the
+   * bottle is counted. A count sets an absolute figure, so it only reverses while
+   * nothing else has touched that bottle since.
+   *
+   * Built from the whole log rather than the filtered view - a count hidden behind
+   * the "Give" filter still blocks the gives underneath it.
+   */
+  const undoable = useMemo(() => {
+    const ok = new Set<number>();
+    const countedSince = new Set<number>();
+    const touchedSince = new Set<number>();
+    for (const m of moves) { // newest first
+      const isCount = m.type === "count";
+      const clear = isCount ? !touchedSince.has(m.item_id) : !countedSince.has(m.item_id);
+      if (clear) ok.add(m.id);
+      if (isCount) countedSince.add(m.item_id);
+      touchedSince.add(m.item_id);
+    }
+    return ok;
+  }, [moves]);
+
   function copyCSV() {
     const rows: (string | number)[][] = [
       ["Date", "Time", "Type", "Item", "Category", "Qty/Value", "Location", "Entered By",
@@ -1570,11 +1595,11 @@ export function Activity({
       {!filtered.length ? (
         <div className="empty">No activity matches filter.<br />Log a move from the Stock tab.</div>
       ) : (
-        filtered.map((m, idx) => {
+        filtered.map((m) => {
           const ts = +new Date(m.ts);
           const dk = dayKey(ts, now);
           const head = dk !== currentDay ? ((currentDay = dk), dk) : null;
-          const canUndo = idx === 0 && (user.role === "owner" || m.user_name === user.name);
+          const canUndo = undoable.has(m.id) && (user.role === "owner" || m.user_name === user.name);
 
           const icon = m.type === "give" ? "↗"
             : m.type === "receive" ? "↓"
