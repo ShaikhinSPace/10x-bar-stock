@@ -1,9 +1,13 @@
+import { redirect } from "next/navigation";
 import { getSession } from "@/lib/auth";
 import { getItems, getRecentMoves, requestNow } from "@/lib/db";
 import { Dashboard } from "../../app";
 
 export default async function DashboardPage() {
-  const user = (await getSession())!; // the layout already redirected if absent
+  // Layout and page render in parallel, so the layout's redirect does not stop this
+  // from running on a signed-out request — it has to guard itself.
+  const user = await getSession();
+  if (!user) redirect("/login");
 
   // "last 7 days" is anchored on the server so render stays pure and hydration matches.
   // 8 days covers the 7-day windows plus the day boundary.
