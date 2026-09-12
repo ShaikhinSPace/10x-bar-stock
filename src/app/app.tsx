@@ -8,7 +8,7 @@ import {
   type SessionUser, type Staff, type WastageReason,
 } from "@/lib/model";
 import {
-  addItem, addUser, archiveItem, countBarBottles, editDelivery, editItem, giveOut, logWaste, receive,
+  addItem, addUser, archiveItem, countBarBottles, editDelivery, editItem, giveOut, giveRun, logWaste, receive,
   submitStocktake,
   receiveDelivery, setCount, setReorderIgnore, setReorderLevel, setUserActive, transferBar, undoMove,
   type Result,
@@ -498,6 +498,7 @@ export function Stock({
   const onPick = setSheetId;
   const [loc, setLoc] = useState<Loc>("store");
   const [counting, setCounting] = useState(false);
+  const [running, setRunning] = useState(false);
   const [cat, setCat] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
@@ -544,6 +545,10 @@ export function Stock({
     );
   }
 
+  if (running) {
+    return <RunMode items={items} onClose={() => setRunning(false)} />;
+  }
+
   return (
     <>
       <div className="ptitle" style={{ justifyContent: "space-between" }}>
@@ -570,6 +575,19 @@ export function Stock({
           </button>
         ))}
       </div>
+
+      <button className="stk-start run" onClick={() => setRunning(true)}>
+        <span className="si">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <path d="M13 3 4 14h7l-1 7 9-11h-7z" strokeLinejoin="round" />
+          </svg>
+        </span>
+        <span className="st">
+          <span className="n">Run stock to a bar</span>
+          <span className="b">Load Patio or Back in one pass, straight from the store</span>
+        </span>
+        <span className="sgo">›</span>
+      </button>
 
       <button className="stk-start" onClick={() => setCounting(true)}>
         <span className="si">
@@ -646,6 +664,132 @@ export function Stock({
       <BottleSheet items={items} moves={moves} id={sheetId} user={user}
         onClose={() => setSheetId(null)} />
     </>
+  );
+}
+
+/* ============================ run mode ============================ */
+
+/**
+ * The barback's give-run as its own full-screen surface.
+ *
+ * Pick the bar you're running to, and the list sorts itself emptiest-at-that-bar
+ * first so the run assembles without hunting. Loading a bottle onto the run is one
+ * tap; the whole run commits in a single all-or-nothing giveRun. Store stock is
+ * shown because it's the ceiling — you can't run what the storeroom doesn't have.
+ *
+ * A run is destination-specific, so switching bars clears the cart rather than
+ * silently running a Patio load out to Back.
+ */
+function RunMode({ items, onClose }: { items: Item[]; onClose: () => void }) {
+  const { pending, run } = useAction();
+  useEscapeClose(onClose);
+  const [dest, setDest] = useState<Loc>("patio");
+  const [q, setQ] = useState("");
+  const [queue, setQueue] = useState<Record<number, number>>({});
+
+  const shown = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return [...items]
+      .filter((i) => !needle || i.name.toLowerCase().includes(needle))
+      // Lowest at the chosen bar floats up; no par level exists, so current
+      // quantity is the proxy for "needs running". Name breaks ties.
+      .sort((a, b) => a[dest] - b[dest] || a.name.localeCompare(b.name));
+  }, [items, dest, q]);
+
+  const total = Object.values(queue).reduce((a, n) => a + n, 0);
+
+  // Clamp to what's in the store — the + can never load more than giveRun would accept.
+  // ponytail: +1 per tap; add a case step (24) for beer if running cases gets tappy.
+  const bump = (id: number, d: number, max: number) =>
+    setQueue((s) => {
+      const next = Math.max(0, Math.min(max, (s[id] ?? 0) + d));
+      const cp = { ...s };
+      if (next <= 0) delete cp[id]; else cp[id] = next;
+      return cp;
+    });
+
+  function commit() {
+    const lines = Object.entries(queue).map(([id, qty]) => ({ itemId: Number(id), qty }));
+    if (!lines.length) return;
+    run(
+      () => giveRun(lines, dest),
+      `Ran ${total} bottle${total === 1 ? "" : "s"} → ${LOC_LABEL[dest]}`,
+      () => setQueue({}), // clears only on success — a refused run keeps the cart to fix
+    );
+  }
+
+  return (
+    <div className="run">
+      <div className="run-head">
+        <div className="ptitle" style={{ margin: 0 }}>
+          Run stock <span className="sub">store → bar</span>
+        </div>
+        <button className="btn ghost" onClick={onClose}>Done</button>
+      </div>
+
+      <div className="run-fixed">
+        <div className="lbl">Running to</div>
+        <div className="run-dest">
+          {(["patio", "back"] as Loc[]).map((b) => (
+            <button key={b} data-loc={b} aria-pressed={dest === b}
+              className={`run-pick${dest === b ? " on" : ""}`}
+              onClick={() => { setDest(b); setQueue({}); }}>
+              <span className="bd" style={{ background: LOC_COLOR[b] }} />
+              <span className="nm">{LOC_LABEL[b]}</span>
+            </button>
+          ))}
+        </div>
+        <div className="hint" style={{ margin: "0 0 12px" }}>
+          Whatever&apos;s running lowest at the bar rises to the top.
+        </div>
+        <div className="search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+            <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
+          </svg>
+          <input placeholder="Search a bottle…" value={q} autoComplete="off"
+            onChange={(e) => setQ(e.target.value)} />
+          {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
+        </div>
+      </div>
+
+      <div className="run-list">
+        {!shown.length && <div className="empty">No bottles match.</div>}
+        {shown.map((i) => {
+          const qty = queue[i.id] ?? 0;
+          const dead = i.store <= 0;
+          const atMax = qty >= i.store;
+          return (
+            <div key={i.id}
+              className={`run-row${qty > 0 ? " queued" : ""}${dest === "back" ? " back" : ""}${dead ? " dead" : ""}`}>
+              <div className="info">
+                <div className="nm">{i.name}</div>
+                <div className="dist">
+                  <span className="d-cat">{cap(i.cat)}</span>
+                  {qty > 0 && <span className="qmark">→ {LOC_SHORT[dest]}</span>}
+                </div>
+              </div>
+              <div className={`instore${dead ? " none" : ""}`}>
+                <span className="v">{dead ? "0" : fmtQty(i.cat, i.store)}</span>
+                <span className="k">{dead ? "empty" : "store"}</span>
+              </div>
+              <div className="run-step">
+                <button className="step" aria-label={`Remove one ${i.name}`} disabled={qty <= 0}
+                  onClick={() => bump(i.id, -1, i.store)}>−</button>
+                <span className={`val${qty <= 0 ? " zero" : ""}`}>{qty}</span>
+                <button className={`step plus${qty > 0 ? " on" : ""}`} aria-label={`Add one ${i.name}`}
+                  disabled={dead || atMax} onClick={() => bump(i.id, 1, i.store)}>+</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <button className={`run-commit${dest === "back" ? " back" : ""}${total > 0 ? " show" : ""}`}
+        disabled={pending || total <= 0} onClick={commit}>
+        <span>{pending ? "Running…" : `Run ${total} bottle${total === 1 ? "" : "s"} → ${LOC_SHORT[dest]}`}</span>
+        <span className="arrow" aria-hidden>→</span>
+      </button>
+    </div>
   );
 }
 

@@ -4,6 +4,7 @@ import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { sql, CATS, LOCS, type Cat, type DeliveryLine, type Loc } from "@/lib/db";
 import { applyDeliveryEdit } from "@/lib/delivery-edit";
+import { applyGiveRun } from "@/lib/give-run";
 import { applyUndo } from "@/lib/undo-move";
 import {
   endSession, hashPassword, requireOwner, requireUser, startSession, verifyPassword,
@@ -100,6 +101,55 @@ export async function giveOut(itemId: number, qty: number, to: Loc): Promise<Res
       returning id`;
 
     if (!rows.length) throw new Error("Not enough in the storeroom — receive stock first.");
+    refresh();
+  });
+}
+
+/**
+ * Run several bottles out to one bar in a single all-or-nothing statement.
+ *
+ * The barback's whole shift is this one loop — store to a bar, over and over —
+ * and tapping Give on each bottle through the sheet is how a run ends up half
+ * logged. If any bottle is short in the storeroom the entire run is refused
+ * rather than partly applied: the `short` CTE is the same store guard giveOut
+ * uses, checked across every line at once before a single row is touched.
+ *
+ * Each line is logged as its own plain `give` move (no batch), so undo, the
+ * activity log and the report treat a run's lines exactly like hand-entered
+ * gives — and they stay clear of getDeliveries, which groups on batch alone.
+ */
+export async function giveRun(
+  lines: { itemId: number; qty: number }[], to: Loc
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireUser();
+    if (!isLoc(to) || to === "store") throw new Error("Pick a bar to run to");
+    if (!Array.isArray(lines) || !lines.length) throw new Error("Load at least one bottle onto the run");
+    if (lines.length > 300) throw new Error("That's too many bottles for one run");
+
+    // Merge duplicates so the same bottle added twice doesn't double-decrement.
+    const merged = new Map<number, number>();
+    for (const l of lines) {
+      const id = Number(l.itemId);
+      if (!Number.isInteger(id)) throw new Error("Unknown bottle on the run");
+      const q = whole(l.qty, "Quantity");
+      if (q < 1) throw new Error("Every bottle on the run needs at least 1");
+      merged.set(id, (merged.get(id) ?? 0) + q);
+    }
+
+    const ids = [...merged.keys()];
+    const qtys = [...merged.values()];
+
+    // Shared with scripts/check-give-run.mjs, which runs this exact statement against
+    // a real database — see the module for why the store guard is all-or-nothing.
+    const rows = await applyGiveRun(sql, { ids, qtys, to, userId: u.id, userName: u.name });
+
+    if (!rows.length) {
+      throw new Error("Not enough in the storeroom for this run — receive stock or lower a quantity.");
+    }
+    if (rows.length !== ids.length) {
+      throw new Error("Some bottles are no longer on the list — reload and try the run again.");
+    }
     refresh();
   });
 }
