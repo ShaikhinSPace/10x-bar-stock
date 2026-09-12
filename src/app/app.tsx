@@ -735,7 +735,10 @@ function RunMode({ items, onClose }: { items: Item[]; onClose: () => void }) {
               className={`run-pick${dest === b ? " on" : ""}`}
               onClick={() => { setDest(b); setQueue({}); }}>
               <span className="bd" style={{ background: LOC_COLOR[b] }} />
-              <span className="nm">{LOC_LABEL[b]}</span>
+              <span className="meta">
+                <span className="nm">{LOC_LABEL[b]}</span>
+                <span className="ct">running lowest at top</span>
+              </span>
             </button>
           ))}
         </div>

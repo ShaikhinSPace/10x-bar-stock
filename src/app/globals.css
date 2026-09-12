@@ -1637,7 +1637,9 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   padding: 13px 15px; color: var(--txt-2); transition: all 0.16s ease; text-align: left;
 }
 .run-pick .bd { width: 11px; height: 11px; border-radius: 50%; flex: none; }
+.run-pick .meta { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .run-pick .nm { font-size: 15px; font-weight: 650; color: var(--txt); }
+.run-pick .ct { font-size: 11.5px; color: var(--txt-3); }
 .run-pick[aria-pressed="true"][data-loc="patio"] { border-color: var(--patio); background: rgba(34, 211, 238, 0.14); }
 .run-pick[aria-pressed="true"][data-loc="back"]  { border-color: var(--back);  background: rgba(167, 139, 250, 0.14); }
 
@@ -1657,6 +1659,17 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .run-row.queued.back { border-color: var(--back); background: linear-gradient(90deg, rgba(167, 139, 250, 0.14), transparent 70%); }
 .run-row.dead { opacity: 0.5; }
 .run-row .info { flex: 1; min-width: 0; }
+/* .nm/.dist/.d-cat are styled under .row for the Stock list, not .run-row — restate
+   them here so the name ellipsizes and the category reads as the muted uppercase label. */
+.run-row .nm {
+  font-weight: 620; font-size: 15px; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.run-row .dist { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.run-row .d-cat {
+  font-size: 11px; color: var(--txt-3); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
 .run-row .qmark { font-size: 11.5px; color: var(--patio); font-weight: 650; }
 .run-row.back .qmark { color: var(--back); }
 
