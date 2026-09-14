@@ -61,6 +61,11 @@
 /* ── resets ── */
 *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; }
+/* Nothing in this app is a prose link — every anchor is a button, a nav item or a
+   tile. Each time one of those turned from <button> into <a> it arrived underlined
+   and in link blue (.btn, the nav items, .stk-start, all found the hard way), so
+   the default is switched off once here rather than patched at the next call site. */
+a { text-decoration: none; color: inherit; }
 body {
   background: var(--bg);
   color: var(--txt);
@@ -168,7 +173,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   padding: 6px 0;
   transition: color 0.2s ease;
   letter-spacing: 0.03em;
-  text-decoration: none;
 }
 .mnav a svg { width: 22px; height: 22px; transition: transform 0.2s ease; }
 .mnav a.on { color: var(--blue); }
@@ -689,9 +693,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .btn {
   background: linear-gradient(135deg, var(--blue) 0%, #3A7BE8 100%);
   color: white;
-  /* Reports' "Generate report" is an <a download>, not a <button>, so without
-     this it renders underlined like a link. */
-  text-decoration: none;
   border-radius: var(--r-sm);
   padding: 13px;
   font-weight: 700;
@@ -1079,11 +1080,20 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
    DESKTOP LAYOUT (≥ 900px)
    ================================================================ */
 
+/* ---- solo shell: a barback has no tabs, so neither nav bar is rendered ----
+   Both bars are gone from the DOM, not just hidden, so the room reserved for
+   them has to come back and the brand bar has to survive at every width — it
+   is normally mobile-only, but with no sidebar it is the only masthead left. */
+body:has(.app.solo) { padding-bottom: 24px; }
+/* No bottom nav to clear, so the run's commit bar can sit low again. */
+.app.solo .run-commit { bottom: max(20px, env(safe-area-inset-bottom)); }
+
 @media (min-width: 900px) {
   body { padding-bottom: 0; }
 
   .app { display: flex; min-height: 100vh; }
   .topbar { display: none; }
+  .app.solo .topbar { display: block; }
   .mnav { display: none; }
 
   .sidebar {
@@ -1101,7 +1111,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
     display: flex; align-items: center; gap: 12px;
     padding: 12px 14px; border-radius: var(--r-sm);
     color: var(--txt-3); font-size: 14.5px; font-weight: 600;
-    text-decoration: none;
     text-align: left; width: 100%;
     transition: all 0.15s ease;
     position: relative;
@@ -1128,6 +1137,13 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   .content { flex: 1; min-width: 0; }
 
   .wrap { max-width: 1120px; padding: 28px 36px 44px; }
+  /* The solo shell keeps the brand bar at desktop width, where .wrap is a centred
+     1120px column — so the bar has to be centred on the same column, or the logo
+     sits alone against the window edge while the content starts 370px in. */
+  .app.solo .topbar {
+    max-width: 1120px; margin-inline: auto; padding: 28px 36px 0;
+    background: none;
+  }
   .ptitle { font-size: 28px; margin-bottom: 24px; }
 
   .list { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
@@ -1617,13 +1633,13 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
   .stk-start.run:hover { border-color: var(--patio); background: rgba(34, 211, 238, 0.1); }
 }
 
-.run {
-  position: fixed; inset: 0; z-index: 50;
-  background: var(--bg);
-  display: flex; flex-direction: column;
-  padding: max(16px, env(safe-area-inset-top)) 16px 0;
-}
-.run-head, .run-fixed, .run-list { width: 100%; max-width: 600px; margin-inline: auto; }
+/* The container is .runview, NOT .run, and that matters: the tile on the Stock page
+   is class="stk-start run", so a bare `.run` rule lands on it too. That collision is
+   what put a position:fixed inset:0 opaque panel over the Stock page — the "screen
+   hovering above everything". Keep `.run` for the tile modifier only.
+   Run mode is a page, not a layer: it flows in .wrap like the stocktake screen. */
+.runview { display: flex; flex-direction: column; }
+.run-head, .run-fixed, .run-list { width: 100%; }
 .run-head {
   flex: none; display: flex; align-items: center; justify-content: space-between;
   gap: 12px; padding-bottom: 14px;
@@ -1643,12 +1659,40 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .run-pick[aria-pressed="true"][data-loc="patio"] { border-color: var(--patio); background: rgba(34, 211, 238, 0.14); }
 .run-pick[aria-pressed="true"][data-loc="back"]  { border-color: var(--back);  background: rgba(167, 139, 250, 0.14); }
 
+/* ---- "just ran": the barback's only undo, since Activity and the bottle
+   sheet are both out of reach for them ---- */
+.justran {
+  width: 100%;
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--r); padding: 10px 13px 4px; margin-bottom: 12px;
+}
+.jr-h {
+  font-size: 10px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--txt-3); margin-bottom: 6px;
+}
+.jr-r {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 0; border-top: 1px solid var(--line);
+}
+.jr-r:first-of-type { border-top: none; }
+.jr-t {
+  flex: 1; min-width: 0; font-size: 13px; color: var(--txt-2);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.jr-w { flex: none; font-size: 10.5px; color: var(--txt-3); font-variant-numeric: tabular-nums; }
+.jr-u {
+  flex: none; font-size: 11.5px; font-weight: 600; color: var(--blue);
+  background: var(--blue-glow); border: 1px solid transparent;
+  border-radius: var(--r-sm); padding: 5px 11px; transition: all .15s ease;
+}
+@media (hover: hover) and (pointer: fine) { .jr-u:hover { border-color: var(--blue); } }
+.jr-u:disabled { opacity: .5; }
+
+/* The page scrolls now, not the list — flex:1 + overflow-y only made sense while
+   .run was a full-height fixed column. The bottom padding clears the commit bar. */
 .run-list {
-  flex: 1; overflow-y: auto;
   display: flex; flex-direction: column; gap: 9px;
-  padding: 2px 0 96px; /* clears the floating Run button */
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 10px);
-  mask-image: linear-gradient(180deg, transparent 0, #000 10px);
+  padding: 2px 0 96px;
 }
 .run-row {
   display: flex; align-items: center; gap: 12px;
@@ -1692,10 +1736,15 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .run-step .plus.on { background: var(--patio); border-color: var(--patio); color: #04222a; }
 .run-row.back .run-step .plus.on { background: var(--back); border-color: var(--back); color: #1b0e3a; }
 
+/* Floats over the page, but above the bottom nav rather than on top of it:
+   z-index sits over .mnav (30) and under the sheet scrim (40), and the offset
+   clears the nav's height so the barback can still switch tabs mid-run. */
 .run-commit {
-  position: absolute; left: 0; right: 0; margin-inline: auto;
-  width: calc(100% - 32px); max-width: 600px;
-  bottom: max(16px, env(safe-area-inset-bottom)); z-index: 2;
+  position: fixed; left: 0; right: 0; margin-inline: auto;
+  width: calc(100% - 36px); max-width: 564px;
+  /* .mnav is ~68px tall plus its safe-area padding; 96px leaves a visible gap
+     instead of resting on it. Measured — 80px left the bar 2px into the nav. */
+  bottom: calc(96px + env(safe-area-inset-bottom)); z-index: 31;
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 16px 18px; border-radius: var(--r);
   background: var(--patio); color: #04222a; font-size: 15px; font-weight: 700;
@@ -1707,6 +1756,8 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .run-commit.show { opacity: 1; transform: none; pointer-events: auto; }
 .run-commit:disabled { filter: saturate(0.6) brightness(0.9); }
 .run-commit .arrow { font-size: 19px; }
+/* No bottom nav on desktop, so it can sit low again. */
+@media (min-width: 900px) { .run-commit { bottom: 24px; } }
 
 /* .mgrid / .mg-col need no mobile rule at all - a div is already block, and
    the cards' own margins carry the spacing exactly as before. Declaring

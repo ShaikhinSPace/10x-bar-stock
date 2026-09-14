@@ -100,9 +100,11 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
 
   const say = (msg: string, error?: boolean) => setToast({ msg, error });
 
+  // A barback's whole app is /stock/run, so there is nowhere for them to navigate:
+  // no tabs, and the bars that would hold them are dropped rather than left empty.
   const tabs: Tab[] = user.role === "owner"
     ? ["dashboard", "stock", "delivery", "activity", "manage"]
-    : ["dashboard", "stock", "delivery", "activity"];
+    : [];
 
   // Link handles the URL, the back button and scroll-to-top; the shell only
   // has to say which one is current.
@@ -129,14 +131,18 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
     <ActionCtx.Provider value={{ pending, run, say }}>
       <h2 className="sr-only">10X Bar stock control</h2>
 
-      <div className="app">
-        <aside className="sidebar">
-          {brand}
-          <div className="snav">{nav}</div>
-          <div className="foot">Store counts whole bottles · bars count partials</div>
-        </aside>
+      <div className={`app${tabs.length ? "" : " solo"}`}>
+        {tabs.length > 0 && (
+          <aside className="sidebar">
+            {brand}
+            <div className="snav">{nav}</div>
+            <div className="foot">Store counts whole bottles · bars count partials</div>
+          </aside>
+        )}
 
         <div className="content">
+          {/* The brand bar is the mobile header; with no sidebar it is the only
+              place the app names itself, so a solo view keeps it at every width. */}
           <div className="topbar">{brand}</div>
           <main className="wrap">
             <div className="whoami">
@@ -150,7 +156,7 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
         </div>
       </div>
 
-      <nav className="mnav"><div className="mnav-in">{nav}</div></nav>
+      {tabs.length > 0 && <nav className="mnav"><div className="mnav-in">{nav}</div></nav>}
 
       {toast && (
         <div className="toast show" role="status" aria-live={toast.error ? "assertive" : "polite"}

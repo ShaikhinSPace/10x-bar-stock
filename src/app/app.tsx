@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CATS, LOCS, LOC_LABEL, LOC_SHORT, WASTAGE_REASONS, cap, fmt, fmtQty, inCat, levelsAt,
@@ -498,7 +500,6 @@ export function Stock({
   const onPick = setSheetId;
   const [loc, setLoc] = useState<Loc>("store");
   const [counting, setCounting] = useState(false);
-  const [running, setRunning] = useState(false);
   const [cat, setCat] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
@@ -545,10 +546,6 @@ export function Stock({
     );
   }
 
-  if (running) {
-    return <RunMode items={items} onClose={() => setRunning(false)} />;
-  }
-
   return (
     <>
       <div className="ptitle" style={{ justifyContent: "space-between" }}>
@@ -576,18 +573,22 @@ export function Stock({
         ))}
       </div>
 
-      <button className="stk-start run" onClick={() => setRunning(true)}>
-        <span className="si">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M13 3 4 14h7l-1 7 9-11h-7z" strokeLinejoin="round" />
-          </svg>
-        </span>
-        <span className="st">
-          <span className="n">Run stock to a bar</span>
-          <span className="b">Load Patio or Back in one pass, straight from the store</span>
-        </span>
-        <span className="sgo">›</span>
-      </button>
+      {/* The barback's surface. The owner works bottle-by-bottle through the sheet,
+          so this stays off their Stock page rather than being a button everyone sees. */}
+      {user.role !== "owner" && (
+        <Link className="stk-start run" href="/stock/run">
+          <span className="si">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M13 3 4 14h7l-1 7 9-11h-7z" strokeLinejoin="round" />
+            </svg>
+          </span>
+          <span className="st">
+            <span className="n">Run stock to a bar</span>
+            <span className="b">Load Patio or Back in one pass, straight from the store</span>
+          </span>
+          <span className="sgo">›</span>
+        </Link>
+      )}
 
       <button className="stk-start" onClick={() => setCounting(true)}>
         <span className="si">
@@ -667,6 +668,52 @@ export function Stock({
   );
 }
 
+/**
+ * What you just ran, with undo.
+ *
+ * The barback's whole app is this one screen, so without this a mis-run is only
+ * fixable inside the six seconds the toast lasts — the Activity tab and the bottle
+ * sheet, where undo otherwise lives, are both off-limits to them.
+ *
+ * Only your own gives, because that is what "just ran" means and it is exactly the
+ * set undoMove will let a barback reverse. Bottles counted since are dropped rather
+ * than shown dead: the count is the truth now, and a run screen is the wrong place
+ * to explain that.
+ */
+function JustRan({
+  moves, user, pending,
+}: {
+  moves: Move[]; user: SessionUser; pending: boolean;
+}) {
+  const { run } = useAction();
+  const undoable = useMemo(() => undoableMoveIds(moves), [moves]);
+  const mine = useMemo(
+    () => moves
+      .filter((m) => m.type === "give" && m.user_name === user.name && undoable.has(m.id))
+      .slice(0, 3),
+    [moves, user.name, undoable]
+  );
+  if (!mine.length) return null;
+
+  return (
+    <div className="justran">
+      <div className="jr-h">Just ran</div>
+      {mine.map((m) => (
+        <div className="jr-r" key={m.id}>
+          <span className="jr-t">
+            {fmtQty(m.cat, m.qty ?? 0)} × {m.item_name} → {LOC_SHORT[m.loc!]}
+          </span>
+          <span className="jr-w">{timeStr(+new Date(m.ts))}</span>
+          <button className="jr-u" disabled={pending}
+            onClick={() => run(() => undoMove(m.id), `Put ${m.item_name} back`)}>
+            Undo
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /* ============================ run mode ============================ */
 
 /**
@@ -680,9 +727,18 @@ export function Stock({
  * A run is destination-specific, so switching bars clears the cart rather than
  * silently running a Patio load out to Back.
  */
-function RunMode({ items, onClose }: { items: Item[]; onClose: () => void }) {
+export function RunMode({
+  items, moves, user,
+}: {
+  items: Item[]; moves: Move[]; user: SessionUser;
+}) {
   const { pending, run } = useAction();
-  useEscapeClose(onClose);
+  const router = useRouter();
+  // For the owner this is one screen among many, so Escape and Done both go back to
+  // Stock. For a barback it is the entire app — there is nowhere to leave to, so
+  // neither exit exists and Sign out is the only way out.
+  const canLeave = user.role === "owner";
+  useEscapeClose(() => { if (canLeave) router.push("/stock"); });
   const [dest, setDest] = useState<Loc>("patio");
   const [q, setQ] = useState("");
   const [queue, setQueue] = useState<Record<number, number>>({});
@@ -719,12 +775,12 @@ function RunMode({ items, onClose }: { items: Item[]; onClose: () => void }) {
   }
 
   return (
-    <div className="run">
+    <div className="runview">
       <div className="run-head">
         <div className="ptitle" style={{ margin: 0 }}>
           Run stock <span className="sub">store → bar</span>
         </div>
-        <button className="btn ghost" onClick={onClose}>Done</button>
+        {canLeave && <Link className="btn ghost" href="/stock">Done</Link>}
       </div>
 
       <div className="run-fixed">
@@ -754,6 +810,8 @@ function RunMode({ items, onClose }: { items: Item[]; onClose: () => void }) {
           {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
         </div>
       </div>
+
+      <JustRan moves={moves} user={user} pending={pending} />
 
       <div className="run-list">
         {!shown.length && <div className="empty">No bottles match.</div>}

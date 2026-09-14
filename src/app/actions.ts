@@ -56,7 +56,10 @@ export async function login(_prev: string | null, form: FormData): Promise<strin
     return "That username and password don't match.";
   }
   await startSession(rows[0].id);
-  redirect("/dashboard"); // throws a control-flow exception — must stay outside any try/catch
+  // Land where the role belongs: the owner gets the dashboard, a barback goes
+  // straight to the run screen, which is the whole of their app.
+  const [me] = await sql`select role from users where id = ${rows[0].id}`;
+  redirect(me.role === "owner" ? "/dashboard" : "/stock/run"); // throws — keep outside any try/catch
 }
 
 export async function logout() {
