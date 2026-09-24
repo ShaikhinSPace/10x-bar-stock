@@ -292,26 +292,27 @@ export async function undoMove(moveId: number): Promise<Result> {
 }
 
 /**
- * Log a give or receive for a PAST business day — the owner's tool for fixing a night
- * that was mis-recorded (a pour or a delivery that never got logged). It applies the
- * stock delta now and stamps the entry with `atMs`, a moment the caller places inside
- * the target business day so it lands in that day's bucket. Owner-only, and built on
- * the same store guard as giveOut so a backdated give can't drive the storeroom below
- * zero. A correction is a real move: undo reverses it like any other.
+ * Log a give, receive, or bar count for a PAST business day — the owner's tool for
+ * fixing a night that was mis-recorded, whether a pour/delivery went unlogged or the
+ * bar was only counted late. It applies the change now and stamps the entry with
+ * `atMs`, a moment the caller places inside the target business day so it lands in
+ * that day's bucket. Owner-only; a give is guarded by the same store check as giveOut,
+ * and a count sets the bar's level and records the drop (from_val -> to_val) the
+ * dashboard reads as poured/consumed. A correction is a real move: undo reverses it.
  */
 export async function addEntry(
-  atMs: number, type: "give" | "receive", itemId: number, qty: number, to: Loc | null,
+  atMs: number, type: "give" | "receive" | "count", itemId: number, qty: number, to: Loc | null,
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireOwner();
-    if (type !== "give" && type !== "receive") throw new Error("Only a give or a receive can be added");
-    const q = whole(qty, "Quantity");
-    if (q < 1) throw new Error("Add at least 1 bottle");
+    if (type !== "give" && type !== "receive" && type !== "count") throw new Error("Pick give, receive, or count");
     if (!Number.isFinite(atMs)) throw new Error("Pick a day for the entry");
     if (atMs > Date.now()) throw new Error("Can't add an entry dated in the future");
     const tsIso = new Date(atMs).toISOString();
 
     if (type === "receive") {
+      const q = whole(qty, "Quantity");
+      if (q < 1) throw new Error("Add at least 1 bottle");
       const rows = await sql`
         with prev as (
           select id, name, cat from items where id = ${itemId} and not archived
@@ -323,7 +324,9 @@ export async function addEntry(
         select 'receive', prev.id, prev.name, prev.cat, ${q}, 'store', ${u.id}, ${u.name}, ${tsIso}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("That bottle is no longer in the list.");
-    } else {
+    } else if (type === "give") {
+      const q = whole(qty, "Quantity");
+      if (q < 1) throw new Error("Add at least 1 bottle");
       if (!isLoc(to) || to === "store") throw new Error("Pick a bar for the give");
       const rows = await sql`
         with prev as (
@@ -343,6 +346,28 @@ export async function addEntry(
         select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
+    } else {
+      // count: set a bar to what was actually there that night. The store isn't counted
+      // (its total is fixed by deliveries and gives), so a count is bars only. from_val
+      // is the level just before, so the drop feeds the dashboard's poured figure.
+      if (!isLoc(to) || to === "store") throw new Error("A count is for a bar, not the storeroom");
+      const v = partial(qty, "Counted amount");
+      const rows = await sql`
+        with prev as (
+          select id, name, cat, case when ${to}::text = 'patio' then patio else back end as v
+          from items where id = ${itemId} and not archived
+        ), upd as (
+          update items set
+            patio = case when ${to}::text = 'patio' then ${v}::numeric else patio end,
+            back  = case when ${to}::text = 'back'  then ${v}::numeric else back  end,
+            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
+          where id = ${itemId} and not archived returning id
+        )
+        insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
+        select 'count', prev.id, prev.name, prev.cat, ${to}::text, prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
+        from prev join upd on upd.id = prev.id returning id`;
+      if (!rows.length) throw new Error("That bottle is no longer in the list.");
     }
     refresh();
   });

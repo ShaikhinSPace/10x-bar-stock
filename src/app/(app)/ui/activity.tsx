@@ -154,10 +154,12 @@ export function Activity({
  */
 function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose: () => void }) {
   const { pending, run } = useAction();
-  const [type, setType] = useState<"give" | "receive">("give");
+  const [type, setType] = useState<"give" | "receive" | "count">("give");
   const [itemId, setItemId] = useState<number | "">("");
   const [qty, setQty] = useState("1");
   const [bar, setBar] = useState<Loc>("patio");
+  const isCount = type === "count";
+  const needsBar = type === "give" || type === "count"; // receive is store-only
 
   const dateOf = (ms: number) => {
     const d = new Date(bizDayKey(ms));
@@ -169,7 +171,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
-  const valid = !!item && Number.isInteger(n) && n >= 1 && !!dateStr;
+  // give/receive are whole bottles; a count is the bar's total, which can be fractional.
+  const valid = !!item && !!dateStr && Number.isFinite(n)
+    && (isCount ? n >= 0 : Number.isInteger(n) && n >= 1);
 
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
@@ -182,13 +186,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
     // ahead of `now` all afternoon (addEntry rejects future entries), so cap at now —
     // which is itself inside the current business day, so the bucket is still right.
     const at = Math.min(atMsFor(dateStr), Date.now());
-    run(
-      () => addEntry(at, type, item.id, n, type === "give" ? bar : null),
-      type === "give"
-        ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
-        : `Added +${n} × ${item.name} received`,
-      onClose,
-    );
+    const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
+      : type === "receive" ? `Added +${n} × ${item.name} received`
+      : `Counted ${item.name} = ${n} on ${LOC_SHORT[bar]}`;
+    run(() => addEntry(at, type, item.id, n, needsBar ? bar : null), msg, onClose);
   }
 
   return (
@@ -204,7 +205,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
           <div className="fld">
             <label>Type</label>
             <div className="actseg">
-              {(["give", "receive"] as const).map((t) => (
+              {(["give", "receive", "count"] as const).map((t) => (
                 <button key={t} type="button" className={type === t ? "on" : ""} onClick={() => setType(t)}>
                   {cap(t)}
                 </button>
@@ -223,13 +224,14 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="frow">
           <div className="fld">
-            <label>Quantity</label>
-            <input type="number" inputMode="numeric" min="1" value={qty}
+            <label>{isCount ? "Counted (bottles)" : "Quantity"}</label>
+            <input type="number" inputMode="decimal" min="0"
+              step={isCount ? "0.25" : "1"} value={qty}
               onChange={(e) => setQty(e.target.value)} />
           </div>
-          {type === "give" && (
+          {needsBar && (
             <div className="fld">
-              <label>To bar</label>
+              <label>{isCount ? "At bar" : "To bar"}</label>
               <div className="actseg">
                 {(["patio", "back"] as Loc[]).map((b) => (
                   <button key={b} type="button" className={bar === b ? "on" : ""} onClick={() => setBar(b)}>
@@ -242,7 +244,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
         </div>
 
         <div className="hint">
-          Applies the stock change now and dates it to that night. Undo it from the log like any entry.
+          {isCount
+            ? "Sets that bar's total for the night and records the drop as poured. Undo it from the log."
+            : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
