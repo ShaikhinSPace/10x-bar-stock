@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import { sql, type Loc } from "@/lib/db";
 import { applyGiveRun } from "@/lib/give-run";
 import { applyUndo } from "@/lib/undo-move";
-import { requireUser } from "@/lib/auth";
+import { requireOwner, requireUser } from "@/lib/auth";
 import { attempt, whole, partial, isLoc, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
@@ -291,5 +291,59 @@ export async function undoMove(moveId: number): Promise<Result> {
   });
 }
 
+/**
+ * Log a give or receive for a PAST business day — the owner's tool for fixing a night
+ * that was mis-recorded (a pour or a delivery that never got logged). It applies the
+ * stock delta now and stamps the entry with `atMs`, a moment the caller places inside
+ * the target business day so it lands in that day's bucket. Owner-only, and built on
+ * the same store guard as giveOut so a backdated give can't drive the storeroom below
+ * zero. A correction is a real move: undo reverses it like any other.
+ */
+export async function addEntry(
+  atMs: number, type: "give" | "receive", itemId: number, qty: number, to: Loc | null,
+): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireOwner();
+    if (type !== "give" && type !== "receive") throw new Error("Only a give or a receive can be added");
+    const q = whole(qty, "Quantity");
+    if (q < 1) throw new Error("Add at least 1 bottle");
+    if (!Number.isFinite(atMs)) throw new Error("Pick a day for the entry");
+    if (atMs > Date.now()) throw new Error("Can't add an entry dated in the future");
+    const tsIso = new Date(atMs).toISOString();
 
-/* ---------------- Categories (owner only) ---------------- */
+    if (type === "receive") {
+      const rows = await sql`
+        with prev as (
+          select id, name, cat from items where id = ${itemId} and not archived
+        ), upd as (
+          update items set store = store + ${q}
+          where id = ${itemId} and not archived returning id
+        )
+        insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
+        select 'receive', prev.id, prev.name, prev.cat, ${q}, 'store', ${u.id}, ${u.name}, ${tsIso}
+        from prev join upd on upd.id = prev.id returning id`;
+      if (!rows.length) throw new Error("That bottle is no longer in the list.");
+    } else {
+      if (!isLoc(to) || to === "store") throw new Error("Pick a bar for the give");
+      const rows = await sql`
+        with prev as (
+          select id, name, cat from items where id = ${itemId} and not archived
+        ), upd as (
+          update items set
+            store = store - ${q},
+            patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
+            back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
+            -- A backdated give can't know the bar's current open-bottle composition, so
+            -- it drops the breakdown to unknown rather than inventing full bottles.
+            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
+          where id = ${itemId} and not archived and store >= ${q} returning id
+        )
+        insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
+        select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
+        from prev join upd on upd.id = prev.id returning id`;
+      if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
+    }
+    refresh();
+  });
+}

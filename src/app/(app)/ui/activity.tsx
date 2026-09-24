@@ -1,20 +1,21 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { LOC_LABEL, LOC_SHORT, cap, fmtQty, undoableMoveIds, type Move, type SessionUser } from "@/lib/model";
-import { undoMove } from "../../actions";
+import { LOC_LABEL, LOC_SHORT, bizDayKey, cap, fmtQty, undoableMoveIds, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { addEntry, undoMove } from "../../actions";
 import { useAction } from "../shell";
 import { dayKey, timeStr } from "./shared";
 
 export function Activity({
-  moves, user, now,
+  moves, items, user, now,
 }: {
-  moves: Move[]; user: SessionUser; now: number;
+  moves: Move[]; items: Item[]; user: SessionUser; now: number;
 }) {
   const { run, say } = useAction();
   const onUndo = (id: number) => run(() => undoMove(id), "Entry undone");
   const onToast = (t: { msg: string; error?: boolean }) => say(t.msg, t.error);
   const [filter, setFilter] = useState<string>("ALL");
+  const [adding, setAdding] = useState(false);
 
   const filtered = useMemo(() => {
     if (filter === "ALL") return moves;
@@ -60,7 +61,19 @@ export function Activity({
           </svg>
           Copy log (CSV)
         </button>
+        {user.role === "owner" && (
+          <button className="tbtn" onClick={() => setAdding((v) => !v)}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2">
+              <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+            </svg>
+            {adding ? "Close" : "Add entry"}
+          </button>
+        )}
       </div>
+
+      {adding && user.role === "owner" && (
+        <AddEntry items={items} now={now} onClose={() => setAdding(false)} />
+      )}
 
       <div className="chips" style={{ marginBottom: 14 }}>
         {["ALL", "GIVE", "RECEIVE", "TRANSFER", "WASTE", "COUNT"].map((f) => (
@@ -130,5 +143,110 @@ export function Activity({
         })
       )}
     </>
+  );
+}
+
+/**
+ * Owner-only: add a give or receive that was missed on a past night. The day picker's
+ * value is a calendar date; we stamp the entry at 8pm local that day, safely inside the
+ * noon→6am business night so it buckets where the owner expects. The stock change is
+ * applied now — a correction is a real move, undoable from the log like any other.
+ */
+function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose: () => void }) {
+  const { pending, run } = useAction();
+  const [type, setType] = useState<"give" | "receive">("give");
+  const [itemId, setItemId] = useState<number | "">("");
+  const [qty, setQty] = useState("1");
+  const [bar, setBar] = useState<Loc>("patio");
+
+  const dateOf = (ms: number) => {
+    const d = new Date(bizDayKey(ms));
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  };
+  const [dateStr, setDateStr] = useState(() => dateOf(now));
+  const todayStr = dateOf(now);
+
+  const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
+  const item = items.find((i) => i.id === itemId);
+  const n = Number(qty);
+  const valid = !!item && Number.isInteger(n) && n >= 1 && !!dateStr;
+
+  function atMsFor(ds: string): number {
+    const [y, m, d] = ds.split("-").map(Number);
+    return new Date(y, m - 1, d, 20, 0, 0, 0).getTime();
+  }
+
+  function save() {
+    if (!valid || !item) return;
+    run(
+      () => addEntry(atMsFor(dateStr), type, item.id, n, type === "give" ? bar : null),
+      type === "give"
+        ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
+        : `Added +${n} × ${item.name} received`,
+      onClose,
+    );
+  }
+
+  return (
+    <div className="card" style={{ marginBottom: 14 }}>
+      <div className="ch"><h3>Add a past entry</h3></div>
+      <div className="frm">
+        <div className="frow">
+          <div className="fld">
+            <label>Day</label>
+            <input type="date" value={dateStr} max={todayStr}
+              onChange={(e) => setDateStr(e.target.value)} />
+          </div>
+          <div className="fld">
+            <label>Type</label>
+            <div className="actseg">
+              {(["give", "receive"] as const).map((t) => (
+                <button key={t} type="button" className={type === t ? "on" : ""} onClick={() => setType(t)}>
+                  {cap(t)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="fld">
+          <label>Bottle</label>
+          <select value={itemId} onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : "")}>
+            <option value="">Pick a bottle…</option>
+            {sorted.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
+          </select>
+        </div>
+
+        <div className="frow">
+          <div className="fld">
+            <label>Quantity</label>
+            <input type="number" inputMode="numeric" min="1" value={qty}
+              onChange={(e) => setQty(e.target.value)} />
+          </div>
+          {type === "give" && (
+            <div className="fld">
+              <label>To bar</label>
+              <div className="actseg">
+                {(["patio", "back"] as Loc[]).map((b) => (
+                  <button key={b} type="button" className={bar === b ? "on" : ""} onClick={() => setBar(b)}>
+                    {LOC_SHORT[b]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="hint">
+          Applies the stock change now and dates it to that night. Undo it from the log like any entry.
+        </div>
+        <div className="medit-foot">
+          <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>
+          <button type="button" className="btn" disabled={!valid || pending} onClick={save}>
+            {pending ? "Adding…" : "Add entry"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
