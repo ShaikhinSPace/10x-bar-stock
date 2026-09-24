@@ -751,6 +751,20 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 @media (hover: hover) and (pointer: fine) {
   .mrow .del:hover { background: var(--red-glow); border-color: rgba(240, 96, 96, 0.3); }
 }
+.mrow .medit-btn {
+  width: 36px; height: 36px; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  color: var(--txt-2); display: flex; align-items: center; justify-content: center;
+  flex: none; transition: all 0.15s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .mrow .medit-btn:hover { color: var(--blue); border-color: var(--blue); background: var(--blue-glow); }
+}
+/* An editing row drops the horizontal layout and stacks the form down its width. */
+.mrow.editing { flex-direction: column; align-items: stretch; gap: 0; }
+.medit { display: flex; flex-direction: column; gap: 12px; }
+.medit .hint { margin: 0; }
+.medit-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
 
 /* ================================================================
    SHEET / MODAL
@@ -1549,6 +1563,60 @@ body:has(.app.solo) { padding-bottom: 24px; }
 @media (hover: hover) and (pointer: fine) { .rcb-u:hover { border-color: var(--blue); } }
 .rcb-u:disabled { opacity: .5; }
 .rcb-l { flex: none; font-size: 10.5px; color: var(--txt-3); font-style: italic; }
+
+/* ==================== categories (Manage) ==================== */
+.catadd { display: flex; gap: 8px; margin-bottom: 12px; }
+.catadd input {
+  flex: 1; min-width: 0;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-sm);
+  padding: 10px 12px; color: var(--txt); font-size: 14px; font-family: inherit;
+}
+.catadd input:focus { outline: none; border-color: var(--blue); }
+.btn.sm { flex: none; padding: 9px 16px; font-size: 13px; width: auto; }
+
+.catlist { display: flex; flex-direction: column; }
+.catrow {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 0; border-top: 1px solid var(--line);
+}
+.catrow:first-child { border-top: none; }
+.cdot { flex: none; width: 10px; height: 10px; border-radius: 50%; }
+.cname {
+  flex: 1; min-width: 0; text-align: left;
+  font-size: 14px; font-weight: 600; color: var(--txt);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) { .cname:hover { color: var(--blue); } }
+.cedit {
+  flex: 1; min-width: 0;
+  background: var(--surface-2); border: 1px solid var(--blue); border-radius: var(--r-sm);
+  padding: 6px 9px; color: var(--txt); font-size: 14px; font-weight: 600; font-family: inherit;
+}
+.cedit:focus { outline: none; }
+.ccount {
+  flex: none; font-size: 11.5px; color: var(--txt-3); font-variant-numeric: tabular-nums;
+}
+.ccount em { font-style: normal; opacity: 0.72; }
+.cacts { flex: none; display: flex; gap: 3px; }
+.cbtn {
+  width: 26px; height: 26px; border-radius: 7px;
+  background: var(--surface-2); color: var(--txt-3);
+  font-size: 13px; line-height: 1; display: grid; place-items: center;
+  transition: all 0.13s ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .cbtn:hover { background: var(--line-2); color: var(--txt); }
+  .cbtn.del:hover { background: rgba(239, 68, 68, 0.16); color: var(--red); }
+}
+.cbtn:disabled { opacity: 0.28; }
+
+.catmove {
+  margin-top: 12px; padding: 11px 12px;
+  background: var(--surface-2); border: 1px solid var(--line-2); border-radius: var(--r-sm);
+}
+.cmrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.cmrow select { flex: 1; min-width: 120px; }
+.btn.sm.ghost { background: transparent; border: 1px solid var(--line-2); color: var(--txt-2); }
 
 /* ==================== stocktake ==================== */
 .stk-start { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
