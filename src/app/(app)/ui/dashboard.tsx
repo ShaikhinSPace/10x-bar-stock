@@ -273,7 +273,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
                 )}
               </div>
               <span className="cl">
-                {x.d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)}
+                {x.d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)} {x.d.getDate()}
               </span>
             </div>
           );
