@@ -74,9 +74,12 @@ export async function deleteCategory(name: string, into: string | null): Promise
     if (!names.includes(name)) throw new Error("That category is already gone.");
     if (names.length <= 1) throw new Error("Every bottle needs a category — keep at least one.");
 
+    // Count archived bottles too: an archived item keeps its `cat`, so it still holds
+    // the items_cat_fkey reference and a raw DELETE would hit a foreign-key violation.
+    // Its category has to be merged elsewhere, not dropped outright.
     const [used] = await sql`
-      select (select count(*) from items     where cat = ${name} and not archived) as items,
-             (select count(*) from item_tags where cat = ${name})                  as tags`;
+      select (select count(*) from items     where cat = ${name}) as items,
+             (select count(*) from item_tags where cat = ${name}) as tags`;
     const inUse = Number(used.items) + Number(used.tags) > 0;
 
     if (!inUse) {

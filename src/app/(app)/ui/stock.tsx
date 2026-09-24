@@ -484,13 +484,18 @@ export function Stocktake({
 
   function submit() {
     if (!variances.length) return;
+    // Clear the draft and close ONLY on success — a failed submit must keep the
+    // count and its localStorage draft, or a multi-minute stocktake is lost to a
+    // network blip. (Same success-gated pattern as RunMode.commit.)
     run(
       () => submitStocktake(loc, variances.map((r) => ({ itemId: r.id, value: r.value }))),
       `${LOC_SHORT[loc]} stocktake saved — ${variances.length} correction${variances.length === 1 ? "" : "s"}`,
+      () => {
+        setCounts({});
+        try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
+        onClose();
+      },
     );
-    setCounts({});
-    try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
-    onClose();
   }
 
   /** Enter jumps to the next field so a count is one continuous run. */

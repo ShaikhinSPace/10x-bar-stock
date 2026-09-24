@@ -178,8 +178,12 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
   function save() {
     if (!valid || !item) return;
+    // 8pm of the chosen day, but never in the future: for today the 8pm stamp would be
+    // ahead of `now` all afternoon (addEntry rejects future entries), so cap at now —
+    // which is itself inside the current business day, so the bucket is still right.
+    const at = Math.min(atMsFor(dateStr), Date.now());
     run(
-      () => addEntry(atMsFor(dateStr), type, item.id, n, type === "give" ? bar : null),
+      () => addEntry(at, type, item.id, n, type === "give" ? bar : null),
       type === "give"
         ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
         : `Added +${n} × ${item.name} received`,

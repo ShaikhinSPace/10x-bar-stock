@@ -49,7 +49,6 @@ export async function editItem(
 
     const extra = [...new Set((Array.isArray(tags) ? tags : []).filter((t) => known.has(String(t))))]
       .filter((t) => t !== cat);
-    if (extra.length > known.size) throw new Error("Too many categories");
 
     const renamed = await sql`
       update items set name = ${n}, cat = ${cat}

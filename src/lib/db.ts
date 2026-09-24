@@ -69,14 +69,17 @@ export async function getRecentMoves(sinceMs: number): Promise<Move[]> {
  * the same read rather than a second round trip.
  */
 export async function getCategories(): Promise<Category[]> {
+  // Both counts exclude archived bottles: an archived item still carries its cat and
+  // tags, but Manage's "is this category in use / can it be deleted" decision is about
+  // live stock, so archived rows must not inflate either figure. (deleteCategory does
+  // its own archived-inclusive check for the foreign key — a different question.)
   const rows = await sql`
     select c.name,
-           count(distinct i.id) filter (where not i.archived) as items,
-           count(distinct t.item_id)                          as tags
+           (select count(*) from items where cat = c.name and not archived) as items,
+           (select count(distinct t.item_id) from item_tags t
+              join items i on i.id = t.item_id
+              where t.cat = c.name and not i.archived) as tags
     from categories c
-    left join items i     on i.cat = c.name
-    left join item_tags t on t.cat = c.name
-    group by c.id, c.name
     order by c.sort, c.name`;
   return rows.map((r) => ({
     name: r.name as string,
