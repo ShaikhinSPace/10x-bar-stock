@@ -51,3 +51,7 @@ next-env.d.ts
 /users.json
 /categories.json
 /item_tags.json
+
+# graphify generated artifacts + local Claude config
+graphify-out/
+.claude/

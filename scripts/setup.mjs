@@ -12,7 +12,15 @@ import { readFileSync } from "node:fs";
 import { hashPassword } from "./hash.mjs";
 
 // With no arguments: schema + items only. With arguments: also create the login.
-const [username, password, name, role = "owner"] = process.argv.slice(2);
+//
+// --schema-only migrates an existing database WITHOUT touching items. Use it on any
+// database that is already live: the item seeding below is insert-on-conflict-do-
+// nothing, which sounds harmless but resurrects every seed bottle that has since
+// been deleted. Fine on a fresh database, wrong on a working bar's.
+const schemaOnly = process.argv.includes("--schema-only");
+const [username, password, name, role = "owner"] = process.argv
+  .slice(2)
+  .filter((a) => a !== "--schema-only");
 const makeUser = Boolean(username || password || name);
 if (makeUser && (!username || !password || !name)) {
   console.error('usage: node --env-file=.env.local scripts/setup.mjs <username> <password> "<Full Name>" [owner|staff]');
@@ -47,6 +55,12 @@ for (const stmt of statements) {
 }
 console.log(`schema ok (${statements.length} statements executed)`);
 
+
+if (schemaOnly) {
+  const [{ count: n }] = await sql`select count(*) from items`;
+  console.log(`schema-only — items left alone (${n} in the database)`);
+  process.exit(0);
+}
 
 const items = JSON.parse(
   readFileSync(new URL("../src/lib/seed-items.json", import.meta.url), "utf8")

@@ -69,6 +69,55 @@ export async function getSession(): Promise<Session | null> {
   return (rows[0] as Session) ?? null;
 }
 
+/* ---------------- login brute-force throttle ---------------- */
+
+// 5 misses locks the username for 15 minutes. Small enough that a real staffer who
+// fat-fingers a password a few times isn't stopped, tight enough that online guessing
+// is hopeless on top of scrypt's per-attempt cost. Keyed by attempted username, so an
+// unknown name is throttled identically and existence still isn't leaked.
+// ponytail: username-scoped, so someone who knows a name could lock that one person out
+// for 15 min (a nuisance, not a breach). Fine for ~10 internal staff; scope by IP too if
+// this ever faces the open internet.
+const MAX_FAILS = 5;
+const LOCK_MS = 15 * 60 * 1000;
+
+/** Seconds until this username can try again, or 0 if it's not locked. */
+export async function loginLockRemaining(username: string): Promise<number> {
+  const [row] = await sql`select locked_until from login_attempts where username = ${username}`;
+  const until = row?.locked_until ? new Date(row.locked_until as string).getTime() : 0;
+  return until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : 0;
+}
+
+/**
+ * Count one failed attempt. The window is rolling: a failure more than LOCK_MS after
+ * the last one (or after a lock already expired) starts the count over at 1 rather
+ * than resurrecting a stale streak. Read-then-write, not one atomic statement — two
+ * simultaneous failures could under-count by one, which is harmless for a throttle.
+ */
+export async function recordLoginFailure(username: string): Promise<void> {
+  const [row] = await sql`
+    select fails, updated_at, locked_until from login_attempts where username = ${username}`;
+  const now = Date.now();
+  const stale = !row
+    || new Date(row.updated_at as string).getTime() < now - LOCK_MS
+    || (row.locked_until != null && new Date(row.locked_until as string).getTime() < now);
+  const fails = stale ? 1 : Number(row.fails) + 1;
+  const lockedUntil = fails >= MAX_FAILS ? new Date(now + LOCK_MS).toISOString() : null;
+  await sql`
+    insert into login_attempts (username, fails, locked_until, updated_at)
+    values (${username}, ${fails}, ${lockedUntil}, now())
+    on conflict (username) do update set
+      fails = ${fails}, locked_until = ${lockedUntil}, updated_at = now()`;
+  // Opportunistic sweep of long-abandoned rows (guessed/junk usernames) so the table
+  // can't grow without bound; only runs on a failure, which is already the rare path.
+  await sql`delete from login_attempts where updated_at < now() - interval '1 day'`;
+}
+
+/** Clear the counter — called on a successful sign-in. */
+export async function clearLoginFailures(username: string): Promise<void> {
+  await sql`delete from login_attempts where username = ${username}`;
+}
+
 /** Use at the top of every Server Action — they are reachable by direct POST. */
 export async function requireUser(): Promise<Session> {
   const s = await getSession();

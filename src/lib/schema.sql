@@ -11,11 +11,12 @@ create table if not exists users (
   created_at    timestamptz not null default now()
 );
 
--- The fixed set of bottle categories - was a CHECK constraint inline on
--- items.cat, now a real table so it's a foreign key instead of a whitelist
--- baked into the column definition. Mirrors CATS in src/lib/model.ts, which
--- stays the source of truth for display order, colors, and Beer's
--- case-of-24 formatting - none of that is data-driven, just this list.
+-- Bottle categories. Owned by the database, not by the code: the owner creates,
+-- renames, reorders, merges and deletes them from Manage, so this table is the
+-- source of truth for which categories exist and what order they display in.
+-- SEED_CATS in src/lib/model.ts only seeds a fresh database and supplies the
+-- hand-picked colours; anything created later gets a colour derived from its name.
+-- Beer's case-of-24 rule is still the one behaviour keyed to a literal name.
 create table if not exists categories (
   id   serial primary key,
   name text not null unique
@@ -24,6 +25,11 @@ insert into categories (name) values
   ('WHISKEY'), ('VODKA'), ('TEQUILA'), ('GIN'), ('RUM'), ('BEER'), ('WINE'), ('MIXER'),
   ('WELL'), ('OTHER')
 on conflict (name) do nothing;
+
+-- Display order, so Manage can reorder without renaming. Backfilled from id for
+-- rows that predate the column, which preserves the original seed order.
+alter table categories add column if not exists sort int;
+update categories set sort = id where sort is null;
 
 create table if not exists items (
   id       serial primary key,
@@ -62,7 +68,10 @@ alter table items add column if not exists back_levels  numeric(10,2)[] not null
 -- re-run.
 alter table items drop constraint if exists items_cat_check;
 alter table items drop constraint if exists items_cat_fkey;
-alter table items add constraint items_cat_fkey foreign key (cat) references categories(name);
+-- on update cascade is what makes renaming a category from Manage possible: the
+-- new name flows out to every item instead of the foreign key refusing the change.
+alter table items add constraint items_cat_fkey foreign key (cat) references categories(name)
+  on update cascade;
 
 -- Extra categories beyond items.cat. A bottle has ONE main category - which
 -- drives every total, colour and the beer cases-of-24 rule - plus any number
@@ -75,6 +84,10 @@ create table if not exists item_tags (
   primary key (item_id, cat)
 );
 create index if not exists item_tags_cat_idx on item_tags (cat);
+-- Same reason as items_cat_fkey: a rename has to reach the tags too.
+alter table item_tags drop constraint if exists item_tags_cat_fkey;
+alter table item_tags add constraint item_tags_cat_fkey foreign key (cat) references categories(name)
+  on update cascade;
 
 -- item_name/cat are denormalised on purpose: the activity log has to stay readable
 -- after an item is archived or renamed.
@@ -109,3 +122,15 @@ create index if not exists moves_item_ts_idx on moves (item_id, ts desc);
 create index if not exists moves_batch_idx on moves (batch) where batch is not null;
 -- the duplicate-invoice guard queries this on every delivery booking
 create index if not exists moves_invoice_idx on moves (invoice) where invoice is not null;
+
+-- Login brute-force throttle. Keyed by the ATTEMPTED username (not users.id) so a
+-- guessed or non-existent name is throttled the same way, which is also what keeps
+-- login from leaking whether a username exists. In-memory counting can't work on
+-- serverless (each request may hit a fresh lambda with no shared memory), so the
+-- one shared store — Postgres — holds it. See auth.ts for the 5-fails / 15-min rule.
+create table if not exists login_attempts (
+  username     text primary key,
+  fails        int not null default 0,
+  locked_until timestamptz,
+  updated_at   timestamptz not null default now()
+);

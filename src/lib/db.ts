@@ -1,6 +1,6 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
-import type { Delivery, Item, Move } from "./model";
+import type { Category, Delivery, Item, Move } from "./model";
 
 // Thrown at module load, so a missing value fails the build rather than every request.
 if (!process.env.DATABASE_URL) {
@@ -59,6 +59,30 @@ export async function getRecentMoves(sinceMs: number): Promise<Move[]> {
     from moves where ts >= ${new Date(sinceMs).toISOString()}
     order by ts desc, id desc`;
   return rows.map(toMove);
+}
+
+/**
+ * Every category, in display order, with what points at it.
+ *
+ * The counts are what Manage needs to decide whether a category can simply be
+ * deleted or has to have its bottles moved somewhere first, so they are part of
+ * the same read rather than a second round trip.
+ */
+export async function getCategories(): Promise<Category[]> {
+  const rows = await sql`
+    select c.name,
+           count(distinct i.id) filter (where not i.archived) as items,
+           count(distinct t.item_id)                          as tags
+    from categories c
+    left join items i     on i.cat = c.name
+    left join item_tags t on t.cat = c.name
+    group by c.id, c.name
+    order by c.sort, c.name`;
+  return rows.map((r) => ({
+    name: r.name as string,
+    items: Number(r.items),
+    tags: Number(r.tags),
+  }));
 }
 
 export async function getMoves(limit = 500): Promise<Move[]> {

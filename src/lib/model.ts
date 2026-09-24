@@ -1,9 +1,50 @@
 // Shared shapes and constants. No server imports — the client bundle pulls this in.
 
-export const CATS = [
+/**
+ * Categories a fresh database is seeded with, and the ones with hand-picked
+ * colours. NOT the whole set — the owner creates and deletes categories from
+ * Manage, so the live list comes from the categories table and is threaded
+ * through as props. Treat this as defaults, never as validation.
+ */
+export const SEED_CATS = [
   "WHISKEY", "VODKA", "TEQUILA", "GIN", "RUM", "BEER", "WINE", "MIXER", "WELL", "OTHER",
 ] as const;
-export type Cat = (typeof CATS)[number];
+
+/** A category name. Free text now, so it is validated against the database. */
+export type Cat = string;
+
+/** One row of the categories table, with what currently points at it. */
+export type Category = {
+  name: string;
+  /** Bottles whose MAIN category this is — what totals and colours key off. */
+  items: number;
+  /** Bottles carrying it as an extra tag. */
+  tags: number;
+};
+
+/** Longest a category name may be; keeps chips and dropdowns from blowing out. */
+export const CAT_MAX = 18;
+
+/**
+ * Normalised form of a typed category name. Upper-cased because every existing
+ * category is, and the name is the primary key the foreign keys point at — so
+ * "Mezcal" and "MEZCAL" must not become two categories.
+ */
+export const normCat = (s: string) => s.trim().toUpperCase().replace(/\s+/g, " ");
+
+/**
+ * A stable colour for a category with no hand-picked one. Derived from the name so
+ * it never repaints between renders, and spread around the wheel so two new
+ * categories are unlikely to collide.
+ */
+export function catHue(name: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < name.length; i++) {
+    h ^= name.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % 360;
+}
 
 export const LOCS = ["store", "patio", "back"] as const;
 export type Loc = (typeof LOCS)[number];
@@ -157,3 +198,22 @@ export const needsReorder = (i: Item) =>
 
 /** "WHISKEY" -> "Whiskey", "manage" -> "Manage". */
 export const cap = (c: string) => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
+
+/**
+ * A bar's night runs past midnight, so a "day" isn't midnight-to-midnight: the shift
+ * runs from noon to roughly 6am the next morning. DAY_START_HOUR is that cutoff — any
+ * move logged before it counts toward the previous date's business day, so one night's
+ * numbers stay in a single bucket instead of splitting at midnight.
+ *
+ * ponytail: one constant for now; it becomes a per-location setting when bars keep
+ * different hours at multi-bar scale — same bizDayKey, just reading the location's cutoff.
+ */
+export const DAY_START_HOUR = 12;
+
+/** Local midnight (ms) of the business day that `ts` falls in — the day-bucket key. */
+export function bizDayKey(ts: number): number {
+  const d = new Date(ts);
+  d.setHours(d.getHours() - DAY_START_HOUR, 0, 0, 0); // pull an after-midnight move back into its night
+  d.setHours(0, 0, 0, 0);                             // floor to that business day's date
+  return d.getTime();
+}
