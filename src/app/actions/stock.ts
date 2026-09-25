@@ -349,29 +349,20 @@ export async function addEntry(
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
     } else {
-      // count: a count is an ABSOLUTE level, not a delta, so unlike give/receive it can't
-      // be backdated — setting a past night's figure onto today's live stock would corrupt
-      // it, and from_val would be the wrong baseline. So a count always records NOW (ts
-      // defaults to now()), and the current business day it buckets into follows from when
-      // it's entered: before noon it lands on last night's shift, after noon on today's.
-      // Bars only — the storeroom isn't counted. from_val is the live level, so the drop is
-      // the real one poured since, which is what the dashboard reads.
-      if (!isLoc(to) || to === "store") throw new Error("A count is for a bar, not the storeroom");
-      const v = partial(qty, "Counted amount");
+      // count: the STORE count. A count is an ABSOLUTE level, not a delta, so unlike
+      // give/receive it can't be backdated — writing a past figure onto today's live stock
+      // would corrupt it. So it records NOW (ts defaults to now()) and buckets into the
+      // current business day. Store is whole sealed bottles; the count reconciles it and
+      // logs the drop (from_val -> to_val) that the dashboard reads as consumed.
+      const v = whole(qty, "Counted amount");
       const rows = await sql`
         with prev as (
-          select id, name, cat, case when ${to}::text = 'patio' then patio else back end as v
-          from items where id = ${itemId} and not archived
+          select id, name, cat, store as v from items where id = ${itemId} and not archived
         ), upd as (
-          update items set
-            patio = case when ${to}::text = 'patio' then ${v}::numeric else patio end,
-            back  = case when ${to}::text = 'back'  then ${v}::numeric else back  end,
-            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
-            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
-          where id = ${itemId} and not archived returning id
+          update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
         )
         insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
-        select 'count', prev.id, prev.name, prev.cat, ${to}::text, prev.v, ${v}, ${u.id}, ${u.name}
+        select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("That bottle is no longer in the list.");
     }

@@ -667,7 +667,10 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
    MANAGE TAB
    ================================================================ */
 
-.addcard .frm { display: flex; flex-direction: column; gap: 12px; }
+/* Base form layout — applies to every .frm (Add bottle, Add-a-past-entry, popovers),
+   not just .addcard, so the day-editor form on Activity gets the same field spacing
+   instead of jamming its fields together. */
+.frm { display: flex; flex-direction: column; gap: 14px; }
 .fld label {
   font-size: 11px; font-weight: 600; color: var(--txt-3);
   letter-spacing: 0.05em; text-transform: uppercase; display: block; margin-bottom: 7px;
@@ -689,6 +692,11 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 }
 .frow { display: flex; gap: 10px; }
 .frow .fld { flex: 1; }
+/* On phones, paired fields (Day + Type, Quantity + Bar) get their own full-width row
+   so nothing is squeezed into a cramped half. */
+@media (max-width: 560px) {
+  .frow { flex-direction: column; gap: 14px; }
+}
 
 .btn {
   background: linear-gradient(135deg, var(--blue) 0%, #3A7BE8 100%);
