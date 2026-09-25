@@ -766,6 +766,30 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .medit .hint { margin: 0; }
 .medit-foot { display: flex; gap: 8px; justify-content: flex-end; margin-top: 2px; }
 
+/* Add-a-past-entry searchable bottle picker (replaces a 140-item native dropdown). */
+.ae-results {
+  margin-top: 6px; max-height: 210px; overflow-y: auto;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--surface-2);
+}
+.ae-hit {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; padding: 10px 12px;
+  border-bottom: 1px solid var(--line); color: var(--txt); transition: background 0.12s ease;
+}
+.ae-hit:last-child { border-bottom: none; }
+.ae-hit .nm { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ae-hit .cat { font-size: 10.5px; color: var(--txt-3); text-transform: uppercase; letter-spacing: 0.04em; flex: none; }
+@media (hover: hover) and (pointer: fine) { .ae-hit:hover { background: var(--surface-3); } }
+.ae-empty { padding: 11px 12px; color: var(--txt-3); font-size: 13px; }
+.ae-picked {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  width: 100%; text-align: left; padding: 9px 12px;
+  border: 1px solid var(--line-2); border-radius: 10px; background: var(--surface-2);
+  color: var(--txt); font-size: 14px;
+}
+.ae-picked small { color: var(--txt-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 4px; }
+.ae-picked .change { color: var(--blue); font-size: 12px; font-weight: 600; flex: none; }
+
 /* ================================================================
    SHEET / MODAL
    ================================================================ */
