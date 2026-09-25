@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { LOC_LABEL, LOC_SHORT, bizDayKey, cap, fmtQty, undoableMoveIds, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { addEntry, undoMove } from "../../actions";
 import { useAction } from "../shell";
@@ -169,6 +169,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   };
   const [dateStr, setDateStr] = useState(() => dateOf(now));
   const todayStr = dateOf(now);
+  const dateRef = useRef<HTMLInputElement>(null);
 
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
   const matches = useMemo(() => {
@@ -186,6 +187,17 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
     return new Date(y, m - 1, d, 20, 0, 0, 0).getTime();
+  }
+  function prettyDate(ds: string): string {
+    const [y, m, d] = ds.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
+  // Show the date as plain text with a small tap target; open the native picker on tap.
+  function openDatePicker() {
+    const el = dateRef.current;
+    if (!el) return;
+    if (el.showPicker) el.showPicker();
+    else { el.focus(); el.click(); }
   }
 
   function save() {
@@ -208,8 +220,17 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
         <div className="frow">
           <div className="fld">
             <label>Day</label>
-            <input type="date" value={dateStr} max={todayStr}
-              onChange={(e) => setDateStr(e.target.value)} />
+            <button type="button" className="ae-date" onClick={openDatePicker}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="17" rx="2" />
+                <path d="M3 9h18M8 2v4M16 2v4" strokeLinecap="round" />
+              </svg>
+              <span className="dv">{prettyDate(dateStr)}</span>
+            </button>
+            <input ref={dateRef} type="date" value={dateStr} max={todayStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              tabIndex={-1} aria-hidden="true"
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
           </div>
           <div className="fld">
             <label>Type</label>
