@@ -78,13 +78,18 @@ export async function getCategories(): Promise<Category[]> {
            (select count(*) from items where cat = c.name and not archived) as items,
            (select count(distinct t.item_id) from item_tags t
               join items i on i.id = t.item_id
-              where t.cat = c.name and not i.archived) as tags
+              where t.cat = c.name and not i.archived) as tags,
+           -- Every reference, archived included, for the delete-vs-merge decision:
+           -- an archived bottle still holds the foreign key.
+           (select count(*) from items     where cat = c.name)
+             + (select count(*) from item_tags where cat = c.name) as refs
     from categories c
     order by c.sort, c.name`;
   return rows.map((r) => ({
     name: r.name as string,
     items: Number(r.items),
     tags: Number(r.tags),
+    refs: Number(r.refs),
   }));
 }
 

@@ -171,9 +171,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
-  // give/receive are whole bottles; a count is the bar's total, which can be fractional.
-  const valid = !!item && !!dateStr && Number.isFinite(n)
-    && (isCount ? n >= 0 : Number.isInteger(n) && n >= 1);
+  // give/receive are whole bottles on a chosen day; a count is the bar's total (which
+  // can be fractional) and always records now, so it doesn't need the day picked.
+  const valid = !!item && Number.isFinite(n)
+    && (isCount ? n >= 0 : Number.isInteger(n) && n >= 1 && !!dateStr);
 
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
@@ -182,10 +183,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
   function save() {
     if (!valid || !item) return;
-    // 8pm of the chosen day, but never in the future: for today the 8pm stamp would be
-    // ahead of `now` all afternoon (addEntry rejects future entries), so cap at now —
-    // which is itself inside the current business day, so the bucket is still right.
-    const at = Math.min(atMsFor(dateStr), Date.now());
+    // A count records NOW — it's an absolute level, not a backdatable delta, so dating it
+    // to a past night would overwrite today's real stock. give/receive stamp 8pm of the
+    // chosen day, capped at now so a same-day entry isn't rejected as future.
+    const at = isCount ? Date.now() : Math.min(atMsFor(dateStr), Date.now());
     const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
       : type === "receive" ? `Added +${n} × ${item.name} received`
       : `Counted ${item.name} = ${n} on ${LOC_SHORT[bar]}`;
@@ -197,11 +198,21 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
       <div className="ch"><h3>Add a past entry</h3></div>
       <div className="frm">
         <div className="frow">
-          <div className="fld">
-            <label>Day</label>
-            <input type="date" value={dateStr} max={todayStr}
-              onChange={(e) => setDateStr(e.target.value)} />
-          </div>
+          {isCount ? (
+            <div className="fld">
+              <label>Records on</label>
+              <div style={{ padding: "9px 2px", color: "var(--txt-2)", fontSize: 13 }}>
+                {new Date(bizDayKey(now)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                <span style={{ color: "var(--txt-3)" }}> · counts now</span>
+              </div>
+            </div>
+          ) : (
+            <div className="fld">
+              <label>Day</label>
+              <input type="date" value={dateStr} max={todayStr}
+                onChange={(e) => setDateStr(e.target.value)} />
+            </div>
+          )}
           <div className="fld">
             <label>Type</label>
             <div className="actseg">
@@ -245,7 +256,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="hint">
           {isCount
-            ? "Sets that bar's total for the night and records the drop as poured. Undo it from the log."
+            ? "Records the bar's total now — the drop from its last figure shows as poured. Counts can't be backdated (they'd overwrite today's real level). Undo it from the log."
             : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">
