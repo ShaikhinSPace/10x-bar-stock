@@ -156,6 +156,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const { pending, run } = useAction();
   const [type, setType] = useState<"give" | "receive" | "count">("give");
   const [itemId, setItemId] = useState<number | "">("");
+  const [q, setQ] = useState("");
   const [qty, setQty] = useState("1");
   const [bar, setBar] = useState<Loc>("patio");
   const isCount = type === "count";
@@ -169,6 +170,11 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const todayStr = dateOf(now);
 
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
+  const matches = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    if (!needle) return [];
+    return sorted.filter((i) => i.name.toLowerCase().includes(needle)).slice(0, 10);
+  }, [sorted, q]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
   // give/receive are whole bottles on a chosen day; a count is the bar's total (which
@@ -186,6 +192,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
     // A count records NOW — it's an absolute level, not a backdatable delta, so dating it
     // to a past night would overwrite today's real stock. give/receive stamp 8pm of the
     // chosen day, capped at now so a same-day entry isn't rejected as future.
+    // Date.now() is correct here: save() is an onClick handler, not render, so reading the
+    // clock at click time is exactly what we want (the purity rule can't see that).
+    // eslint-disable-next-line react-hooks/purity
     const at = isCount ? Date.now() : Math.min(atMsFor(dateStr), Date.now());
     const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
       : type === "receive" ? `Added +${n} × ${item.name} received`
@@ -227,10 +236,29 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="fld">
           <label>Bottle</label>
-          <select value={itemId} onChange={(e) => setItemId(e.target.value ? Number(e.target.value) : "")}>
-            <option value="">Pick a bottle…</option>
-            {sorted.map((i) => <option key={i.id} value={i.id}>{i.name}</option>)}
-          </select>
+          {item ? (
+            <button type="button" className="ae-picked"
+              onClick={() => { setItemId(""); setQ(""); }}>
+              <span>{item.name} <small>{cap(item.cat)}</small></span>
+              <span className="change">change</span>
+            </button>
+          ) : (
+            <>
+              <input placeholder="Search a bottle…" value={q} autoComplete="off"
+                onChange={(e) => setQ(e.target.value)} />
+              {q.trim() && (
+                <div className="ae-results">
+                  {matches.length ? matches.map((i) => (
+                    <button key={i.id} type="button" className="ae-hit"
+                      onClick={() => { setItemId(i.id); setQ(""); }}>
+                      <span className="nm">{i.name}</span>
+                      <span className="cat">{cap(i.cat)}</span>
+                    </button>
+                  )) : <div className="ae-empty">No bottle matches.</div>}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <div className="frow">
