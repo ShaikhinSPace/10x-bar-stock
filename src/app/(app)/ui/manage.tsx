@@ -431,7 +431,9 @@ function CategoriesCard({
   }
 
   function remove(c: Category) {
-    const inUse = c.items + c.tags > 0;
+    // refs, not items+tags: an archived bottle still holds the category's foreign key,
+    // so it must be merged, not hard-deleted — matching what deleteCategory enforces.
+    const inUse = c.refs > 0;
     if (!inUse) {
       if (!confirm(`Delete ${cap(c.name)}? Nothing is using it.`)) return;
       run(() => deleteCategory(c.name, null), `${cap(c.name)} deleted`);

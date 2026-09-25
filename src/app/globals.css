@@ -1225,7 +1225,7 @@ body:has(.app.solo) { padding-bottom: 24px; }
   }
   /* one flat KPI row, all 5 tiles equal weight - matches the SAP/Fiori
      KPI-tile pattern rather than one oversized hero metric plus a grid */
-  .tiles { grid-column: span 12; gap: 12px; grid-template-columns: repeat(5, 1fr); }
+  .tiles { grid-column: span 12; gap: 12px; grid-template-columns: repeat(6, 1fr); }
   .tile { padding: 14px 16px; display: flex; flex-direction: column; justify-content: center; min-height: 100%; }
   .tile .v { font-size: 26px; }
   .at-reorder { grid-column: span 12; margin-bottom: 0; }
@@ -1242,7 +1242,7 @@ body:has(.app.solo) { padding-bottom: 24px; }
 }
 
 @media (max-width: 899px) {
-  .tiles { grid-template-columns: repeat(3, 1fr); }  /* 5 tiles: 3-then-2 on a phone */
+  .tiles { grid-template-columns: repeat(3, 1fr); }  /* 6 tiles: two rows of 3 on a phone */
   .tile .v { font-size: 19px; }
   .tile .k { font-size: 10px; }
   .rtable .hide-sm { display: none; }

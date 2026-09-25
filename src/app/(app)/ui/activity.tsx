@@ -154,10 +154,12 @@ export function Activity({
  */
 function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose: () => void }) {
   const { pending, run } = useAction();
-  const [type, setType] = useState<"give" | "receive">("give");
+  const [type, setType] = useState<"give" | "receive" | "count">("give");
   const [itemId, setItemId] = useState<number | "">("");
   const [qty, setQty] = useState("1");
   const [bar, setBar] = useState<Loc>("patio");
+  const isCount = type === "count";
+  const needsBar = type === "give" || type === "count"; // receive is store-only
 
   const dateOf = (ms: number) => {
     const d = new Date(bizDayKey(ms));
@@ -169,7 +171,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
-  const valid = !!item && Number.isInteger(n) && n >= 1 && !!dateStr;
+  // give/receive are whole bottles on a chosen day; a count is the bar's total (which
+  // can be fractional) and always records now, so it doesn't need the day picked.
+  const valid = !!item && Number.isFinite(n)
+    && (isCount ? n >= 0 : Number.isInteger(n) && n >= 1 && !!dateStr);
 
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
@@ -178,17 +183,14 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
   function save() {
     if (!valid || !item) return;
-    // 8pm of the chosen day, but never in the future: for today the 8pm stamp would be
-    // ahead of `now` all afternoon (addEntry rejects future entries), so cap at now —
-    // which is itself inside the current business day, so the bucket is still right.
-    const at = Math.min(atMsFor(dateStr), Date.now());
-    run(
-      () => addEntry(at, type, item.id, n, type === "give" ? bar : null),
-      type === "give"
-        ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
-        : `Added +${n} × ${item.name} received`,
-      onClose,
-    );
+    // A count records NOW — it's an absolute level, not a backdatable delta, so dating it
+    // to a past night would overwrite today's real stock. give/receive stamp 8pm of the
+    // chosen day, capped at now so a same-day entry isn't rejected as future.
+    const at = isCount ? Date.now() : Math.min(atMsFor(dateStr), Date.now());
+    const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
+      : type === "receive" ? `Added +${n} × ${item.name} received`
+      : `Counted ${item.name} = ${n} on ${LOC_SHORT[bar]}`;
+    run(() => addEntry(at, type, item.id, n, needsBar ? bar : null), msg, onClose);
   }
 
   return (
@@ -196,15 +198,25 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
       <div className="ch"><h3>Add a past entry</h3></div>
       <div className="frm">
         <div className="frow">
-          <div className="fld">
-            <label>Day</label>
-            <input type="date" value={dateStr} max={todayStr}
-              onChange={(e) => setDateStr(e.target.value)} />
-          </div>
+          {isCount ? (
+            <div className="fld">
+              <label>Records on</label>
+              <div style={{ padding: "9px 2px", color: "var(--txt-2)", fontSize: 13 }}>
+                {new Date(bizDayKey(now)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
+                <span style={{ color: "var(--txt-3)" }}> · counts now</span>
+              </div>
+            </div>
+          ) : (
+            <div className="fld">
+              <label>Day</label>
+              <input type="date" value={dateStr} max={todayStr}
+                onChange={(e) => setDateStr(e.target.value)} />
+            </div>
+          )}
           <div className="fld">
             <label>Type</label>
             <div className="actseg">
-              {(["give", "receive"] as const).map((t) => (
+              {(["give", "receive", "count"] as const).map((t) => (
                 <button key={t} type="button" className={type === t ? "on" : ""} onClick={() => setType(t)}>
                   {cap(t)}
                 </button>
@@ -223,13 +235,14 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="frow">
           <div className="fld">
-            <label>Quantity</label>
-            <input type="number" inputMode="numeric" min="1" value={qty}
+            <label>{isCount ? "Counted (bottles)" : "Quantity"}</label>
+            <input type="number" inputMode="decimal" min="0"
+              step={isCount ? "0.25" : "1"} value={qty}
               onChange={(e) => setQty(e.target.value)} />
           </div>
-          {type === "give" && (
+          {needsBar && (
             <div className="fld">
-              <label>To bar</label>
+              <label>{isCount ? "At bar" : "To bar"}</label>
               <div className="actseg">
                 {(["patio", "back"] as Loc[]).map((b) => (
                   <button key={b} type="button" className={bar === b ? "on" : ""} onClick={() => setBar(b)}>
@@ -242,7 +255,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
         </div>
 
         <div className="hint">
-          Applies the stock change now and dates it to that night. Undo it from the log like any entry.
+          {isCount
+            ? "Records the bar's total now — the drop from its last figure shows as poured. Counts can't be backdated (they'd overwrite today's real level). Undo it from the log."
+            : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">
           <button type="button" className="btn ghost" onClick={onClose}>Cancel</button>

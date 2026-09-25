@@ -29,6 +29,11 @@ export function Dashboard({
   const waste7 = moves
     .filter((m) => m.type === "waste" && +new Date(m.ts) >= since)
     .reduce((a, m) => a + (m.qty ?? 0), 0);
+  // What the bars were counted DOWN over the week — product poured, sold, or gone.
+  // This is how usage shows up on nights you just count instead of logging pours.
+  const poured7 = moves
+    .filter((m) => m.type === "count" && +new Date(m.ts) >= since)
+    .reduce((a, m) => a + Math.max(0, (m.from_val ?? 0) - (m.to_val ?? 0)), 0);
 
   return (
     <>
@@ -56,6 +61,9 @@ export function Dashboard({
           </button>
           <div className="tile">
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
+          </div>
+          <div className="tile">
+            <div className="v">{fmt(poured7)}</div><div className="k">Poured · 7d</div>
           </div>
           <div className={`tile${waste7 > 0 ? " warnstate" : ""}`}>
             <div className="v">{fmt(waste7)}</div><div className="k">Wasted · 7d</div>
@@ -265,7 +273,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
                 )}
               </div>
               <span className="cl">
-                {x.d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)}
+                {x.d.toLocaleDateString("en-US", { weekday: "short" }).slice(0, 2)} {x.d.getDate()}
               </span>
             </div>
           );

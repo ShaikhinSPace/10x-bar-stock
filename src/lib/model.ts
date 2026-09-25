@@ -16,10 +16,17 @@ export type Cat = string;
 /** One row of the categories table, with what currently points at it. */
 export type Category = {
   name: string;
-  /** Bottles whose MAIN category this is — what totals and colours key off. */
+  /** LIVE bottles whose MAIN category this is — what totals and colours key off. */
   items: number;
-  /** Bottles carrying it as an extra tag. */
+  /** LIVE bottles carrying it as an extra tag. */
   tags: number;
+  /**
+   * Total references INCLUDING archived bottles. An archived bottle still holds the
+   * category foreign key, so a category with refs > 0 can't be hard-deleted — its
+   * bottles must be merged elsewhere first. `items`/`tags` (live) drive the display;
+   * `refs` drives the delete-vs-merge decision, so the two never disagree with the server.
+   */
+  refs: number;
 };
 
 /** Longest a category name may be; keeps chips and dropdowns from blowing out. */
