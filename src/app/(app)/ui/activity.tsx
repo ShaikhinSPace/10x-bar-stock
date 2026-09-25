@@ -36,7 +36,7 @@ export function Activity({
       const base = [d.toLocaleDateString("en-US"), timeStr(+d)];
       const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
       if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
-      else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name, ...extra]);
+      else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc ?? "store"], m.user_name, ...extra]);
       else if (m.type === "waste") rows.push([...base, "WASTAGE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "transfer") rows.push([...base, "TRANSFER", m.item_name, m.cat, m.qty ?? 0, `${LOC_LABEL[m.loc!]} -> ${LOC_LABEL[m.to_loc!]}`, m.user_name, ...extra]);
       else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
@@ -103,7 +103,8 @@ export function Activity({
             : m.type === "transfer" ? "transfer"
             : m.loc ?? "store";
 
-          const tagLabel = m.type === "receive" ? (m.batch ? "Delivery" : "Received")
+          const tagLabel = m.type === "receive"
+              ? (m.batch ? "Delivery" : m.loc && m.loc !== "store" ? `Received (${LOC_SHORT[m.loc]})` : "Received")
             : m.type === "waste" ? `Wasted (${LOC_SHORT[m.loc!]})`
             : m.type === "transfer" ? `${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
             : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`;
@@ -158,9 +159,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const [itemId, setItemId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [qty, setQty] = useState("1");
-  const [bar, setBar] = useState<Loc>("patio");
+  const [loc, setLoc] = useState<Loc>("patio");
   const isCount = type === "count";
-  const needsBar = type === "give"; // give picks a bar; receive and count are the storeroom
+  const needsLoc = type === "give" || type === "receive"; // count is the storeroom only
 
   const dateOf = (ms: number) => {
     const d = new Date(bizDayKey(ms));
@@ -177,10 +178,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   }, [sorted, q]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
-  // All whole bottles (the store is sealed bottles). give/receive need a day and >= 1;
-  // a store count records now (no day) and may be 0 (an emptied storeroom).
-  const valid = !!item && Number.isInteger(n)
-    && (isCount ? n >= 0 : n >= 1 && !!dateStr);
+  // All whole bottles (the store is sealed bottles) on a chosen day. give/receive need
+  // >= 1; a store count may be 0 (an emptied storeroom).
+  const valid = !!item && Number.isInteger(n) && !!dateStr
+    && (isCount ? n >= 0 : n >= 1);
 
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
@@ -189,17 +190,15 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
   function save() {
     if (!valid || !item) return;
-    // A count records NOW — it's an absolute level, not a backdatable delta, so dating it
-    // to a past night would overwrite today's real stock. give/receive stamp 8pm of the
-    // chosen day, capped at now so a same-day entry isn't rejected as future.
+    // 8pm of the chosen day, capped at now so a same-day entry isn't rejected as future.
     // Date.now() is correct here: save() is an onClick handler, not render, so reading the
     // clock at click time is exactly what we want (the purity rule can't see that).
     // eslint-disable-next-line react-hooks/purity
-    const at = isCount ? Date.now() : Math.min(atMsFor(dateStr), Date.now());
-    const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
-      : type === "receive" ? `Added +${n} × ${item.name} received`
+    const at = Math.min(atMsFor(dateStr), Date.now());
+    const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[loc]}`
+      : type === "receive" ? `Received ${n} × ${item.name} → ${LOC_SHORT[loc]}`
       : `Store count: ${item.name} = ${n}`;
-    run(() => addEntry(at, type, item.id, n, needsBar ? bar : null), msg, onClose);
+    run(() => addEntry(at, type, item.id, n, needsLoc ? loc : null), msg, onClose);
   }
 
   return (
@@ -207,26 +206,17 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
       <div className="ch"><h3>Add a past entry</h3></div>
       <div className="frm">
         <div className="frow">
-          {isCount ? (
-            <div className="fld">
-              <label>Records on</label>
-              <div style={{ padding: "9px 2px", color: "var(--txt-2)", fontSize: 13 }}>
-                {new Date(bizDayKey(now)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                <span style={{ color: "var(--txt-3)" }}> · counts now</span>
-              </div>
-            </div>
-          ) : (
-            <div className="fld">
-              <label>Day</label>
-              <input type="date" value={dateStr} max={todayStr}
-                onChange={(e) => setDateStr(e.target.value)} />
-            </div>
-          )}
+          <div className="fld">
+            <label>Day</label>
+            <input type="date" value={dateStr} max={todayStr}
+              onChange={(e) => setDateStr(e.target.value)} />
+          </div>
           <div className="fld">
             <label>Type</label>
             <div className="actseg">
               {(["give", "receive", "count"] as const).map((t) => (
-                <button key={t} type="button" className={type === t ? "on" : ""} onClick={() => setType(t)}>
+                <button key={t} type="button" className={type === t ? "on" : ""}
+                  onClick={() => { setType(t); setLoc(t === "give" ? "patio" : "store"); }}>
                   {cap(t)}
                 </button>
               ))}
@@ -267,13 +257,13 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
             <input type="number" inputMode="numeric" min="0" step="1" value={qty}
               onChange={(e) => setQty(e.target.value)} />
           </div>
-          {needsBar && (
+          {needsLoc && (
             <div className="fld">
-              <label>To bar</label>
+              <label>{type === "give" ? "To bar" : "Into"}</label>
               <div className="actseg">
-                {(["patio", "back"] as Loc[]).map((b) => (
-                  <button key={b} type="button" className={bar === b ? "on" : ""} onClick={() => setBar(b)}>
-                    {LOC_SHORT[b]}
+                {(type === "give" ? (["patio", "back"] as Loc[]) : (["store", "patio", "back"] as Loc[])).map((l) => (
+                  <button key={l} type="button" className={loc === l ? "on" : ""} onClick={() => setLoc(l)}>
+                    {LOC_SHORT[l]}
                   </button>
                 ))}
               </div>
@@ -283,7 +273,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="hint">
           {isCount
-            ? "Records the storeroom's total now — the drop from its last figure shows as consumed. Counts can't be backdated (they'd overwrite today's real stock). Undo it from the log."
+            ? "Enter the storeroom's current count; the day sets which shift it closes. The drop from its last figure shows as consumed. Undo it from the log."
             : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">

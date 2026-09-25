@@ -31,11 +31,17 @@ async function lastMove(id) {
   return r;
 }
 
-async function receiveEntry(id, q, tsIso) {
+async function receiveEntry(id, q, to, tsIso) {
   return sql`with prev as (select id,name,cat from items where id=${id} and not archived), upd as (
-      update items set store = store + ${q} where id=${id} and not archived returning id)
+      update items set
+        store = store + case when ${to}::text='store' then ${q}::numeric else 0 end,
+        patio = patio + case when ${to}::text='patio' then ${q}::numeric else 0 end,
+        back  = back  + case when ${to}::text='back'  then ${q}::numeric else 0 end,
+        patio_levels = case when ${to}::text='patio' then '{}'::numeric[] else patio_levels end,
+        back_levels  = case when ${to}::text='back'  then '{}'::numeric[] else back_levels  end
+      where id=${id} and not archived returning id)
     insert into moves (type,item_id,item_name,cat,qty,loc,user_id,user_name,ts)
-    select 'receive',prev.id,prev.name,prev.cat,${q},'store',${uid},${uname},${tsIso}
+    select 'receive',prev.id,prev.name,prev.cat,${q},${to}::text,${uid},${uname},${tsIso}
     from prev join upd on upd.id=prev.id returning id`;
 }
 // A STORE count records NOW (ts defaults to now()); it's absolute, so it isn't backdated.
@@ -68,12 +74,21 @@ const PAST = new Date("2026-03-14T20:00:00").toISOString();
 try {
   await check("backdated receive raises the store and stamps the date", async () => {
     const a = await bottle("recv", 5);
-    const rows = await receiveEntry(a, 3, PAST);
+    const rows = await receiveEntry(a, 3, "store", PAST);
     assert.equal(rows.length, 1);
     assert.equal((await at(a)).store, 8);
     const m = await lastMove(a);
     assert.equal(m.type, "receive");
     assert.equal(new Date(m.ts).toISOString(), PAST, "ts backdated");
+  });
+
+  await check("receive into a bar raises that bar, not the store", async () => {
+    const a = await bottle("rbar", 5, 1); // store 5, patio 1
+    const rows = await receiveEntry(a, 2, "patio", PAST);
+    assert.equal(rows.length, 1);
+    const s = await at(a);
+    assert.deepEqual({ store: s.store, patio: s.patio }, { store: 5, patio: 3 }, "patio +2, store unchanged");
+    assert.deepEqual(s.levels, [], "bar breakdown dropped");
   });
 
   await check("backdated give lowers store, raises bar, drops the breakdown", async () => {
