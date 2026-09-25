@@ -83,9 +83,18 @@ const LOCK_MS = 15 * 60 * 1000;
 
 /** Seconds until this username can try again, or 0 if it's not locked. */
 export async function loginLockRemaining(username: string): Promise<number> {
-  const [row] = await sql`select locked_until from login_attempts where username = ${username}`;
-  const until = row?.locked_until ? new Date(row.locked_until as string).getTime() : 0;
-  return until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : 0;
+  try {
+    const [row] = await sql`select locked_until from login_attempts where username = ${username}`;
+    const until = row?.locked_until ? new Date(row.locked_until as string).getTime() : 0;
+    return until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : 0;
+  } catch (e) {
+    // The throttle store must NEVER be able to take down sign-in. If login_attempts is
+    // missing or the query errors, degrade to "not locked" so login still works — the
+    // throttle is simply off until the store is healthy again. (This exact failure — a
+    // missing login_attempts table on a fresh prod branch — 500'd login before.)
+    console.error("[throttle] loginLockRemaining failed, allowing login:", e);
+    return 0;
+  }
 }
 
 /**
@@ -95,27 +104,36 @@ export async function loginLockRemaining(username: string): Promise<number> {
  * simultaneous failures could under-count by one, which is harmless for a throttle.
  */
 export async function recordLoginFailure(username: string): Promise<void> {
-  const [row] = await sql`
-    select fails, updated_at, locked_until from login_attempts where username = ${username}`;
-  const now = Date.now();
-  const stale = !row
-    || new Date(row.updated_at as string).getTime() < now - LOCK_MS
-    || (row.locked_until != null && new Date(row.locked_until as string).getTime() < now);
-  const fails = stale ? 1 : Number(row.fails) + 1;
-  const lockedUntil = fails >= MAX_FAILS ? new Date(now + LOCK_MS).toISOString() : null;
-  await sql`
-    insert into login_attempts (username, fails, locked_until, updated_at)
-    values (${username}, ${fails}, ${lockedUntil}, now())
-    on conflict (username) do update set
-      fails = ${fails}, locked_until = ${lockedUntil}, updated_at = now()`;
-  // Opportunistic sweep of long-abandoned rows (guessed/junk usernames) so the table
-  // can't grow without bound; only runs on a failure, which is already the rare path.
-  await sql`delete from login_attempts where updated_at < now() - interval '1 day'`;
+  try {
+    const [row] = await sql`
+      select fails, updated_at, locked_until from login_attempts where username = ${username}`;
+    const now = Date.now();
+    const stale = !row
+      || new Date(row.updated_at as string).getTime() < now - LOCK_MS
+      || (row.locked_until != null && new Date(row.locked_until as string).getTime() < now);
+    const fails = stale ? 1 : Number(row.fails) + 1;
+    const lockedUntil = fails >= MAX_FAILS ? new Date(now + LOCK_MS).toISOString() : null;
+    await sql`
+      insert into login_attempts (username, fails, locked_until, updated_at)
+      values (${username}, ${fails}, ${lockedUntil}, now())
+      on conflict (username) do update set
+        fails = ${fails}, locked_until = ${lockedUntil}, updated_at = now()`;
+    // Opportunistic sweep of long-abandoned rows (guessed/junk usernames) so the table
+    // can't grow without bound; only runs on a failure, which is already the rare path.
+    await sql`delete from login_attempts where updated_at < now() - interval '1 day'`;
+  } catch (e) {
+    // A throttle-store failure must not surface to the user mid-login — swallow it.
+    console.error("[throttle] recordLoginFailure failed:", e);
+  }
 }
 
 /** Clear the counter — called on a successful sign-in. */
 export async function clearLoginFailures(username: string): Promise<void> {
-  await sql`delete from login_attempts where username = ${username}`;
+  try {
+    await sql`delete from login_attempts where username = ${username}`;
+  } catch (e) {
+    console.error("[throttle] clearLoginFailures failed:", e);
+  }
 }
 
 /** Use at the top of every Server Action — they are reachable by direct POST. */
