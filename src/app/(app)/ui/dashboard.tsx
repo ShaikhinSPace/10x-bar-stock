@@ -242,23 +242,24 @@ function CategoryCard({ items, cats }: { items: Item[]; cats: Category[] }) {
 }
 
 function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
-  const per = last7(now).map((d) => ({ d, p: 0, b: 0 }));
+  const per = last7(now).map((d) => ({ d, p: 0, b: 0, u: 0 }));
   for (const m of moves) {
     if (m.type !== "give") continue;
     const md = bizDayKey(new Date(m.ts).getTime());
     const slot = per.find((x) => x.d.getTime() === md);
     if (!slot) continue;
     if (m.loc === "patio") slot.p += m.qty ?? 0;
-    else slot.b += m.qty ?? 0;
+    else if (m.loc === "back") slot.b += m.qty ?? 0;
+    else slot.u += m.qty ?? 0; // give whose bar wasn't recorded
   }
-  const max = Math.max(1, ...per.map((x) => x.p + x.b));
+  const max = Math.max(1, ...per.map((x) => x.p + x.b + x.u));
 
   return (
     <div className="card at-trend">
       <div className="ch"><h3>Given out · last 7 days</h3></div>
       <div className="cols">
         {per.map((x, idx) => {
-          const tot = x.p + x.b;
+          const tot = x.p + x.b + x.u;
           return (
             <div className="col" key={idx}>
               <span className="cv">{tot || ""}</span>
@@ -267,6 +268,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
                   <>
                     {x.b > 0 && <span className="seg b" style={{ height: (x.b / max) * 118 }} />}
                     {x.p > 0 && <span className="seg p" style={{ height: (x.p / max) * 118 }} />}
+                    {x.u > 0 && <span className="seg" style={{ height: (x.u / max) * 118, background: "var(--txt-3)" }} />}
                   </>
                 ) : (
                   <span className="dot" />
@@ -282,6 +284,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
       <div className="legend">
         <span><i style={{ background: "var(--patio)" }} />Patio</span>
         <span><i style={{ background: "var(--back)" }} />Back</span>
+        {per.some((x) => x.u > 0) && <span><i style={{ background: "var(--txt-3)" }} />Unknown</span>}
       </div>
     </div>
   );

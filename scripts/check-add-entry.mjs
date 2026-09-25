@@ -101,6 +101,17 @@ try {
     assert.equal((await lastMove(a)).type, "give");
   });
 
+  await check("give with unknown bar lowers store, credits no bar, logs loc=null", async () => {
+    const a = await bottle("unk", 6, 1); // store 6, patio 1
+    const rows = await giveEntry(a, 2, null, PAST);
+    assert.equal(rows.length, 1);
+    const s = await at(a);
+    assert.deepEqual({ store: s.store, patio: s.patio }, { store: 4, patio: 1 }, "store -2, no bar credited");
+    const m = await lastMove(a);
+    assert.equal(m.type, "give");
+    assert.equal(m.loc, null, "bar recorded as unknown");
+  });
+
   await check("backdated give can't oversell the storeroom", async () => {
     const a = await bottle("short", 1);
     const rows = await giveEntry(a, 5, "patio", PAST);

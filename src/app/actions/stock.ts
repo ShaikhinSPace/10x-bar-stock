@@ -338,7 +338,12 @@ export async function addEntry(
     } else if (type === "give") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
-      if (!isLoc(to) || to === "store") throw new Error("Pick a bar for the give");
+      // `to` is a bar, OR null for a give whose bar you don't remember. Either way the
+      // bottles left the storeroom (store drops, and it's a 'give' so it counts as given
+      // out); an unknown give just isn't credited to a specific bar — a later bar count
+      // absorbs it. A backdated/unknown give can't know a bar's open-bottle composition,
+      // so it drops that bar's breakdown rather than inventing full bottles.
+      if (to != null && (!isLoc(to) || to === "store")) throw new Error("Give to a bar, or leave the bar unknown");
       const rows = await sql`
         with prev as (
           select id, name, cat from items where id = ${itemId} and not archived
@@ -347,8 +352,6 @@ export async function addEntry(
             store = store - ${q},
             patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
             back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-            -- A backdated give can't know the bar's current open-bottle composition, so
-            -- it drops the breakdown to unknown rather than inventing full bottles.
             patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
             back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
           where id = ${itemId} and not archived and store >= ${q} returning id

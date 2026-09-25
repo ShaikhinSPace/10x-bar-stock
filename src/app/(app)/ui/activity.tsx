@@ -35,7 +35,7 @@ export function Activity({
       const d = new Date(m.ts);
       const base = [d.toLocaleDateString("en-US"), timeStr(+d)];
       const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
-      if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
+      if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, m.loc ? LOC_LABEL[m.loc] : "Unknown bar", m.user_name, ...extra]);
       else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc ?? "store"], m.user_name, ...extra]);
       else if (m.type === "waste") rows.push([...base, "WASTAGE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "transfer") rows.push([...base, "TRANSFER", m.item_name, m.cat, m.qty ?? 0, `${LOC_LABEL[m.loc!]} -> ${LOC_LABEL[m.to_loc!]}`, m.user_name, ...extra]);
@@ -107,6 +107,7 @@ export function Activity({
               ? (m.batch ? "Delivery" : m.loc && m.loc !== "store" ? `Received (${LOC_SHORT[m.loc]})` : "Received")
             : m.type === "waste" ? `Wasted (${LOC_SHORT[m.loc!]})`
             : m.type === "transfer" ? `${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
+            : m.type === "give" && !m.loc ? "Unknown"
             : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`;
 
           return (
@@ -159,7 +160,8 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const [itemId, setItemId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [qty, setQty] = useState("1");
-  const [loc, setLoc] = useState<Loc>("patio");
+  // "either" = a give whose bar you don't remember; it still left the store (given out).
+  const [loc, setLoc] = useState<Loc | "either">("patio");
   const isCount = type === "count";
   const needsLoc = type === "give" || type === "receive"; // count is the storeroom only
 
@@ -207,10 +209,13 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
     // clock at click time is exactly what we want (the purity rule can't see that).
     // eslint-disable-next-line react-hooks/purity
     const at = Math.min(atMsFor(dateStr), Date.now());
-    const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[loc]}`
-      : type === "receive" ? `Received ${n} × ${item.name} → ${LOC_SHORT[loc]}`
+    // give to "either" bar → null destination (store drops, no bar credited).
+    const dest: Loc | null = needsLoc ? (loc === "either" ? null : loc) : null;
+    const where = loc === "either" ? "unknown bar" : LOC_SHORT[loc];
+    const msg = type === "give" ? `Added ${n} × ${item.name} → ${where}`
+      : type === "receive" ? `Received ${n} × ${item.name} → ${where}`
       : `Store count: ${item.name} = ${n}`;
-    run(() => addEntry(at, type, item.id, n, needsLoc ? loc : null), msg, onClose);
+    run(() => addEntry(at, type, item.id, n, dest), msg, onClose);
   }
 
   return (
@@ -282,9 +287,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
             <div className="fld">
               <label>{type === "give" ? "To bar" : "Into"}</label>
               <div className="actseg">
-                {(type === "give" ? (["patio", "back"] as Loc[]) : (["store", "patio", "back"] as Loc[])).map((l) => (
+                {(type === "give" ? (["patio", "back", "either"] as const) : (["store", "patio", "back"] as const)).map((l) => (
                   <button key={l} type="button" className={loc === l ? "on" : ""} onClick={() => setLoc(l)}>
-                    {LOC_SHORT[l]}
+                    {l === "either" ? "Not sure" : LOC_SHORT[l]}
                   </button>
                 ))}
               </div>
@@ -295,6 +300,8 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
         <div className="hint">
           {isCount
             ? "Enter the storeroom's current count; the day sets which shift it closes. The drop from its last figure shows as consumed. Undo it from the log."
+            : type === "give" && loc === "either"
+            ? "Don't know the bar? It still leaves the storeroom and counts as given out; a later bar count sorts out which bar got it."
             : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">
