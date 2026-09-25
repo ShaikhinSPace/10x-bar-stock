@@ -160,7 +160,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const [qty, setQty] = useState("1");
   const [bar, setBar] = useState<Loc>("patio");
   const isCount = type === "count";
-  const needsBar = type === "give" || type === "count"; // receive is store-only
+  const needsBar = type === "give"; // give picks a bar; receive and count are the storeroom
 
   const dateOf = (ms: number) => {
     const d = new Date(bizDayKey(ms));
@@ -177,10 +177,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   }, [sorted, q]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
-  // give/receive are whole bottles on a chosen day; a count is the bar's total (which
-  // can be fractional) and always records now, so it doesn't need the day picked.
-  const valid = !!item && Number.isFinite(n)
-    && (isCount ? n >= 0 : Number.isInteger(n) && n >= 1 && !!dateStr);
+  // All whole bottles (the store is sealed bottles). give/receive need a day and >= 1;
+  // a store count records now (no day) and may be 0 (an emptied storeroom).
+  const valid = !!item && Number.isInteger(n)
+    && (isCount ? n >= 0 : n >= 1 && !!dateStr);
 
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
@@ -198,7 +198,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
     const at = isCount ? Date.now() : Math.min(atMsFor(dateStr), Date.now());
     const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
       : type === "receive" ? `Added +${n} × ${item.name} received`
-      : `Counted ${item.name} = ${n} on ${LOC_SHORT[bar]}`;
+      : `Store count: ${item.name} = ${n}`;
     run(() => addEntry(at, type, item.id, n, needsBar ? bar : null), msg, onClose);
   }
 
@@ -263,14 +263,13 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="frow">
           <div className="fld">
-            <label>{isCount ? "Counted (bottles)" : "Quantity"}</label>
-            <input type="number" inputMode="decimal" min="0"
-              step={isCount ? "0.25" : "1"} value={qty}
+            <label>{isCount ? "Counted in store" : "Quantity"}</label>
+            <input type="number" inputMode="numeric" min="0" step="1" value={qty}
               onChange={(e) => setQty(e.target.value)} />
           </div>
           {needsBar && (
             <div className="fld">
-              <label>{isCount ? "At bar" : "To bar"}</label>
+              <label>To bar</label>
               <div className="actseg">
                 {(["patio", "back"] as Loc[]).map((b) => (
                   <button key={b} type="button" className={bar === b ? "on" : ""} onClick={() => setBar(b)}>
@@ -284,7 +283,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="hint">
           {isCount
-            ? "Records the bar's total now — the drop from its last figure shows as poured. Counts can't be backdated (they'd overwrite today's real level). Undo it from the log."
+            ? "Records the storeroom's total now — the drop from its last figure shows as consumed. Counts can't be backdated (they'd overwrite today's real stock). Undo it from the log."
             : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">

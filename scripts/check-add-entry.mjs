@@ -38,18 +38,12 @@ async function receiveEntry(id, q, tsIso) {
     select 'receive',prev.id,prev.name,prev.cat,${q},'store',${uid},${uname},${tsIso}
     from prev join upd on upd.id=prev.id returning id`;
 }
-// A count records NOW (ts defaults to now()); it's absolute, so it isn't backdated.
-async function countEntry(id, v, to) {
-  return sql`with prev as (select id,name,cat, case when ${to}::text='patio' then patio else back end as v
-      from items where id=${id} and not archived), upd as (
-      update items set
-        patio = case when ${to}::text='patio' then ${v}::numeric else patio end,
-        back  = case when ${to}::text='back'  then ${v}::numeric else back  end,
-        patio_levels = case when ${to}::text='patio' then '{}'::numeric[] else patio_levels end,
-        back_levels  = case when ${to}::text='back'  then '{}'::numeric[] else back_levels  end
-      where id=${id} and not archived returning id)
+// A STORE count records NOW (ts defaults to now()); it's absolute, so it isn't backdated.
+async function countEntry(id, v) {
+  return sql`with prev as (select id,name,cat, store as v from items where id=${id} and not archived), upd as (
+      update items set store = ${v}::numeric where id=${id} and not archived returning id)
     insert into moves (type,item_id,item_name,cat,loc,from_val,to_val,user_id,user_name)
-    select 'count',prev.id,prev.name,prev.cat,${to}::text,prev.v,${v},${uid},${uname}
+    select 'count',prev.id,prev.name,prev.cat,'store',prev.v,${v},${uid},${uname}
     from prev join upd on upd.id=prev.id returning id`;
 }
 async function giveEntry(id, q, to, tsIso) {
@@ -99,16 +93,15 @@ try {
     assert.deepEqual(await at(a), { store: 1, patio: 0, levels: [] }, "untouched");
   });
 
-  await check("backdated count sets the bar and records the drop (poured)", async () => {
-    const a = await bottle("count", 5, 3); // patio starts at 3
-    const rows = await countEntry(a, 1.5, "patio");
+  await check("store count sets the store and records the drop (consumed)", async () => {
+    const a = await bottle("count", 8); // store starts at 8
+    const rows = await countEntry(a, 5);
     assert.equal(rows.length, 1);
-    const s = await at(a);
-    assert.equal(s.patio, 1.5, "bar set to the count");
-    assert.deepEqual(s.levels, [], "breakdown dropped");
-    const [m] = await sql`select type, from_val, to_val from moves where item_id=${a} order by id desc limit 1`;
+    assert.equal((await at(a)).store, 5, "store set to the count");
+    const [m] = await sql`select type, loc, from_val, to_val from moves where item_id=${a} order by id desc limit 1`;
     assert.equal(m.type, "count");
-    assert.equal(round(m.from_val) - round(m.to_val), 1.5, "poured = from - to = 1.5");
+    assert.equal(m.loc, "store");
+    assert.equal(round(m.from_val) - round(m.to_val), 3, "consumed = from - to = 3");
   });
 
   console.log(fails ? `\n${fails} failed` : "\nall add-entry checks passed");
