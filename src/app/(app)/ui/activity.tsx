@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { LOC_LABEL, LOC_SHORT, bizDayKey, cap, fmtQty, undoableMoveIds, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { addEntry, undoMove } from "../../actions";
 import { useAction } from "../shell";
@@ -35,8 +35,8 @@ export function Activity({
       const d = new Date(m.ts);
       const base = [d.toLocaleDateString("en-US"), timeStr(+d)];
       const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
-      if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
-      else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, "Store", m.user_name, ...extra]);
+      if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, m.loc ? LOC_LABEL[m.loc] : "Unknown bar", m.user_name, ...extra]);
+      else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc ?? "store"], m.user_name, ...extra]);
       else if (m.type === "waste") rows.push([...base, "WASTAGE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "transfer") rows.push([...base, "TRANSFER", m.item_name, m.cat, m.qty ?? 0, `${LOC_LABEL[m.loc!]} -> ${LOC_LABEL[m.to_loc!]}`, m.user_name, ...extra]);
       else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
@@ -103,9 +103,11 @@ export function Activity({
             : m.type === "transfer" ? "transfer"
             : m.loc ?? "store";
 
-          const tagLabel = m.type === "receive" ? (m.batch ? "Delivery" : "Received")
+          const tagLabel = m.type === "receive"
+              ? (m.batch ? "Delivery" : m.loc && m.loc !== "store" ? `Received (${LOC_SHORT[m.loc]})` : "Received")
             : m.type === "waste" ? `Wasted (${LOC_SHORT[m.loc!]})`
             : m.type === "transfer" ? `${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
+            : m.type === "give" && !m.loc ? "Unknown"
             : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`;
 
           return (
@@ -158,9 +160,10 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const [itemId, setItemId] = useState<number | "">("");
   const [q, setQ] = useState("");
   const [qty, setQty] = useState("1");
-  const [bar, setBar] = useState<Loc>("patio");
+  // "either" = a give whose bar you don't remember; it still left the store (given out).
+  const [loc, setLoc] = useState<Loc | "either">("patio");
   const isCount = type === "count";
-  const needsBar = type === "give"; // give picks a bar; receive and count are the storeroom
+  const needsLoc = type === "give" || type === "receive"; // count is the storeroom only
 
   const dateOf = (ms: number) => {
     const d = new Date(bizDayKey(ms));
@@ -168,6 +171,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   };
   const [dateStr, setDateStr] = useState(() => dateOf(now));
   const todayStr = dateOf(now);
+  const dateRef = useRef<HTMLInputElement>(null);
 
   const sorted = useMemo(() => [...items].sort((a, b) => a.name.localeCompare(b.name)), [items]);
   const matches = useMemo(() => {
@@ -177,29 +181,41 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   }, [sorted, q]);
   const item = items.find((i) => i.id === itemId);
   const n = Number(qty);
-  // All whole bottles (the store is sealed bottles). give/receive need a day and >= 1;
-  // a store count records now (no day) and may be 0 (an emptied storeroom).
-  const valid = !!item && Number.isInteger(n)
-    && (isCount ? n >= 0 : n >= 1 && !!dateStr);
+  // All whole bottles (the store is sealed bottles) on a chosen day. give/receive need
+  // >= 1; a store count may be 0 (an emptied storeroom).
+  const valid = !!item && Number.isInteger(n) && !!dateStr
+    && (isCount ? n >= 0 : n >= 1);
 
   function atMsFor(ds: string): number {
     const [y, m, d] = ds.split("-").map(Number);
     return new Date(y, m - 1, d, 20, 0, 0, 0).getTime();
   }
+  function prettyDate(ds: string): string {
+    const [y, m, d] = ds.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+  }
+  // Show the date as plain text with a small tap target; open the native picker on tap.
+  function openDatePicker() {
+    const el = dateRef.current;
+    if (!el) return;
+    if (el.showPicker) el.showPicker();
+    else { el.focus(); el.click(); }
+  }
 
   function save() {
     if (!valid || !item) return;
-    // A count records NOW — it's an absolute level, not a backdatable delta, so dating it
-    // to a past night would overwrite today's real stock. give/receive stamp 8pm of the
-    // chosen day, capped at now so a same-day entry isn't rejected as future.
+    // 8pm of the chosen day, capped at now so a same-day entry isn't rejected as future.
     // Date.now() is correct here: save() is an onClick handler, not render, so reading the
     // clock at click time is exactly what we want (the purity rule can't see that).
     // eslint-disable-next-line react-hooks/purity
-    const at = isCount ? Date.now() : Math.min(atMsFor(dateStr), Date.now());
-    const msg = type === "give" ? `Added ${n} × ${item.name} → ${LOC_SHORT[bar]}`
-      : type === "receive" ? `Added +${n} × ${item.name} received`
+    const at = Math.min(atMsFor(dateStr), Date.now());
+    // give to "either" bar → null destination (store drops, no bar credited).
+    const dest: Loc | null = needsLoc ? (loc === "either" ? null : loc) : null;
+    const where = loc === "either" ? "unknown bar" : LOC_SHORT[loc];
+    const msg = type === "give" ? `Added ${n} × ${item.name} → ${where}`
+      : type === "receive" ? `Received ${n} × ${item.name} → ${where}`
       : `Store count: ${item.name} = ${n}`;
-    run(() => addEntry(at, type, item.id, n, needsBar ? bar : null), msg, onClose);
+    run(() => addEntry(at, type, item.id, n, dest), msg, onClose);
   }
 
   return (
@@ -207,26 +223,26 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
       <div className="ch"><h3>Add a past entry</h3></div>
       <div className="frm">
         <div className="frow">
-          {isCount ? (
-            <div className="fld">
-              <label>Records on</label>
-              <div style={{ padding: "9px 2px", color: "var(--txt-2)", fontSize: 13 }}>
-                {new Date(bizDayKey(now)).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })}
-                <span style={{ color: "var(--txt-3)" }}> · counts now</span>
-              </div>
-            </div>
-          ) : (
-            <div className="fld">
-              <label>Day</label>
-              <input type="date" value={dateStr} max={todayStr}
-                onChange={(e) => setDateStr(e.target.value)} />
-            </div>
-          )}
+          <div className="fld">
+            <label>Day</label>
+            <button type="button" className="ae-date" onClick={openDatePicker}>
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="17" rx="2" />
+                <path d="M3 9h18M8 2v4M16 2v4" strokeLinecap="round" />
+              </svg>
+              <span className="dv">{prettyDate(dateStr)}</span>
+            </button>
+            <input ref={dateRef} type="date" value={dateStr} max={todayStr}
+              onChange={(e) => setDateStr(e.target.value)}
+              tabIndex={-1} aria-hidden="true"
+              style={{ position: "absolute", width: 1, height: 1, opacity: 0, pointerEvents: "none" }} />
+          </div>
           <div className="fld">
             <label>Type</label>
             <div className="actseg">
               {(["give", "receive", "count"] as const).map((t) => (
-                <button key={t} type="button" className={type === t ? "on" : ""} onClick={() => setType(t)}>
+                <button key={t} type="button" className={type === t ? "on" : ""}
+                  onClick={() => { setType(t); setLoc(t === "give" ? "patio" : "store"); }}>
                   {cap(t)}
                 </button>
               ))}
@@ -267,13 +283,13 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
             <input type="number" inputMode="numeric" min="0" step="1" value={qty}
               onChange={(e) => setQty(e.target.value)} />
           </div>
-          {needsBar && (
+          {needsLoc && (
             <div className="fld">
-              <label>To bar</label>
+              <label>{type === "give" ? "To bar" : "Into"}</label>
               <div className="actseg">
-                {(["patio", "back"] as Loc[]).map((b) => (
-                  <button key={b} type="button" className={bar === b ? "on" : ""} onClick={() => setBar(b)}>
-                    {LOC_SHORT[b]}
+                {(type === "give" ? (["patio", "back", "either"] as const) : (["store", "patio", "back"] as const)).map((l) => (
+                  <button key={l} type="button" className={loc === l ? "on" : ""} onClick={() => setLoc(l)}>
+                    {l === "either" ? "Not sure" : LOC_SHORT[l]}
                   </button>
                 ))}
               </div>
@@ -283,7 +299,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
 
         <div className="hint">
           {isCount
-            ? "Records the storeroom's total now — the drop from its last figure shows as consumed. Counts can't be backdated (they'd overwrite today's real stock). Undo it from the log."
+            ? "Enter the storeroom's current count; the day sets which shift it closes. The drop from its last figure shows as consumed. Undo it from the log."
+            : type === "give" && loc === "either"
+            ? "Don't know the bar? It still leaves the storeroom and counts as given out; a later bar count sorts out which bar got it."
             : "Applies the stock change now and dates it to that night. Undo it from the log like any entry."}
         </div>
         <div className="medit-foot">

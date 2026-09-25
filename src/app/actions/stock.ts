@@ -315,21 +315,35 @@ export async function addEntry(
     if (type === "receive") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
+      // Receive into the storeroom (a delivery) or straight onto a bar. Whole bottles;
+      // a bar receive drops that bar's open-bottle breakdown since the new bottles'
+      // composition isn't known (same as a backdated give).
+      if (!isLoc(to)) throw new Error("Pick where it's received");
       const rows = await sql`
         with prev as (
           select id, name, cat from items where id = ${itemId} and not archived
         ), upd as (
-          update items set store = store + ${q}
+          update items set
+            store = store + case when ${to}::text = 'store' then ${q}::numeric else 0 end,
+            patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
+            back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
+            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
           where id = ${itemId} and not archived returning id
         )
         insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-        select 'receive', prev.id, prev.name, prev.cat, ${q}, 'store', ${u.id}, ${u.name}, ${tsIso}
+        select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("That bottle is no longer in the list.");
     } else if (type === "give") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
-      if (!isLoc(to) || to === "store") throw new Error("Pick a bar for the give");
+      // `to` is a bar, OR null for a give whose bar you don't remember. Either way the
+      // bottles left the storeroom (store drops, and it's a 'give' so it counts as given
+      // out); an unknown give just isn't credited to a specific bar — a later bar count
+      // absorbs it. A backdated/unknown give can't know a bar's open-bottle composition,
+      // so it drops that bar's breakdown rather than inventing full bottles.
+      if (to != null && (!isLoc(to) || to === "store")) throw new Error("Give to a bar, or leave the bar unknown");
       const rows = await sql`
         with prev as (
           select id, name, cat from items where id = ${itemId} and not archived
@@ -338,8 +352,6 @@ export async function addEntry(
             store = store - ${q},
             patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
             back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-            -- A backdated give can't know the bar's current open-bottle composition, so
-            -- it drops the breakdown to unknown rather than inventing full bottles.
             patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
             back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
           where id = ${itemId} and not archived and store >= ${q} returning id
@@ -349,11 +361,10 @@ export async function addEntry(
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
     } else {
-      // count: the STORE count. A count is an ABSOLUTE level, not a delta, so unlike
-      // give/receive it can't be backdated — writing a past figure onto today's live stock
-      // would corrupt it. So it records NOW (ts defaults to now()) and buckets into the
-      // current business day. Store is whole sealed bottles; the count reconciles it and
-      // logs the drop (from_val -> to_val) that the dashboard reads as consumed.
+      // count: the STORE count. It reconciles the storeroom to the counted figure now and
+      // logs a count move dated to the chosen day, so its drop (from_val -> to_val) buckets
+      // into that shift as consumed. Store is whole sealed bottles. Caller enters the
+      // current physical count; the day just says which shift it closes.
       const v = whole(qty, "Counted amount");
       const rows = await sql`
         with prev as (
@@ -361,8 +372,8 @@ export async function addEntry(
         ), upd as (
           update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
         )
-        insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
-        select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}
+        insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
+        select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("That bottle is no longer in the list.");
     }

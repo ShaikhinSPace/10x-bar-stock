@@ -797,6 +797,17 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 }
 .ae-picked small { color: var(--txt-3); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; margin-left: 4px; }
 .ae-picked .change { color: var(--blue); font-size: 12px; font-weight: 600; flex: none; }
+/* Compact date: plain text + a small calendar tap-target that opens the native picker,
+   instead of the chunky full-width date input. */
+.ae-date {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 8px 2px; color: var(--txt); font-size: 15px; font-weight: 600;
+  text-align: left; transition: color 0.15s ease;
+}
+.ae-date svg { color: var(--txt-3); flex: none; transition: color 0.15s ease; }
+@media (hover: hover) and (pointer: fine) {
+  .ae-date:hover, .ae-date:hover svg { color: var(--blue); }
+}
 
 /* ================================================================
    SHEET / MODAL
