@@ -55,3 +55,7 @@ next-env.d.ts
 # graphify generated artifacts + local Claude config
 graphify-out/
 .claude/
+
+# oh-my-claudecode operational state (sessions, replays, throttle timers).
+# Not source — matches the user-global ignore but anchored to work anywhere in the tree.
+.omc/

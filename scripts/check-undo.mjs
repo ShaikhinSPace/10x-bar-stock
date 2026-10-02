@@ -158,6 +158,30 @@ try {
     "the patio breakdown must be cleared — a reversed total says nothing about the split");
   assert.deepEqual(lv.back_levels, [], "and an untouched bar keeps its empty breakdown");
 
+  /* ---- 8. a receive onto a bar reverses from THAT bar, not the storeroom ---- */
+  const r8 = await bottle("R8", 10, 3, 0);
+  await sql`update items set patio = patio + 2 where id = ${r8}`;
+  const barRec = await log(r8, { type: "receive", qty: 2, loc: "patio" });
+  assert.equal(await applyUndo(sql, await move(barRec.id)), null);
+  assert.deepEqual(await at(r8), { store: 10, patio: 3, back: 0 }, "bar receive reverses from the bar");
+
+  /* ---- 9. two undos of one move reverse it once ---- */
+  const d9 = await bottle("D9", 10);
+  await sql`update items set store = store - 4, patio = patio + 4 where id = ${d9}`;
+  const g9 = await log(d9, { type: "give", qty: 4, loc: "patio" });
+  const row9 = await move(g9.id);
+  const both = await Promise.all([applyUndo(sql, row9), applyUndo(sql, row9)]);
+  assert.equal(both.filter((r) => r === null).length, 1, "exactly one undo wins");
+  assert.deepEqual(await at(d9), { store: 10, patio: 0, back: 0 }, "and stock is reversed once");
+
+  /* ---- 10. a count dated to a past day is still undoable while it is last ---- */
+  const b10 = await bottle("B10", 10);
+  await sql`update items set store = 6 where id = ${b10}`;
+  const c10 = await log(b10, { type: "count", loc: "store", from_val: 10, to_val: 6 });
+  await sql`update moves set ts = ts - interval '3 days' where id = ${c10.id}`;
+  assert.equal(await applyUndo(sql, await move(c10.id)), null, "backdated count undoes");
+  assert.deepEqual(await at(b10), { store: 10, patio: 0, back: 0 });
+
   console.log(
     "undo ok - an older give reverses exactly with newer gives on top; a count freezes "
     + "what is under it and only reverses while it is the last word; another bottle's "

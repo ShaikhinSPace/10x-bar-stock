@@ -16,7 +16,10 @@ export function Manage({
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const { pending, run } = useAction();
   const [name, setName] = useState("");
-  const [cat, setCat] = useState<Cat>("WHISKEY");
+  const [picked, setCat] = useState<Cat>("");
+  // The pick can be renamed or deleted from the Categories card while this form is open;
+  // fall back to the first live category rather than submitting a name that's gone.
+  const cat = cats.some((c) => c.name === picked) ? picked : (cats[0]?.name ?? "");
   const [store, setStore] = useState("0");
   const [rl, setRl] = useState("2");
   const [mq, setMq] = useState("");
@@ -315,9 +318,14 @@ function BottleRow({ i, cats, run }: {
       </div>
       <div className="rl">
         <label>reorder</label>
-        <input type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
+        <input key={i.rl} type="number" inputMode="numeric" min="0" defaultValue={fmt(i.rl)}
           onBlur={(e) => {
             const v = Number(e.target.value);
+            // A blank or garbled field is "never mind", not a reorder level of zero.
+            if (e.target.value.trim() === "" || !Number.isFinite(v) || v < 0) {
+              e.target.value = fmt(i.rl);
+              return;
+            }
             if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`);
           }} />
       </div>

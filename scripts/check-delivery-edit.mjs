@@ -89,7 +89,7 @@ try {
   // A: 6 -> 9 (+3).  B: 4 -> 4 (unchanged).  C: absent -> 5 (+5).
   let rows = await applyDeliveryEdit(sql, {
     batch, ids: [a, b, c], qtys: [9, 4, 5],
-    invoice: `INV-${TAG}`, supplier: "Southern Glazer",
+    invoice: `INV-${TAG}`, supplier: "Southern Glazer", affectsStock: true,
   });
   assert.equal(rows.length, 3, "every line should have been rewritten");
   assert.equal(await store(a), 19, "A moved by the difference (+3), not by the new total");
@@ -100,7 +100,7 @@ try {
   // A: 9 -> 9.  B: 4 -> gone (-4).  C: 5 -> 2 (-3).
   rows = await applyDeliveryEdit(sql, {
     batch, ids: [a, c], qtys: [9, 2],
-    invoice: `INV-${TAG}`, supplier: null,
+    invoice: `INV-${TAG}`, supplier: null, affectsStock: true,
   });
   assert.equal(rows.length, 2);
   assert.equal(await store(a), 19, "untouched line stays put");
@@ -125,7 +125,7 @@ try {
 
   rows = await applyDeliveryEdit(sql, {
     batch, ids: [a], qtys: [9], // dropping C would need to claw back 2 from a store of 1
-    invoice: `INV-${TAG}`, supplier: null,
+    invoice: `INV-${TAG}`, supplier: null, affectsStock: true,
   });
   assert.equal(rows.length, 0, "an impossible edit must be refused");
   assert.equal(await store(a), snapshot.a, "a refused edit must not move any stock");
@@ -141,7 +141,7 @@ try {
   const beforeDupe = await delivery(batch);
   rows = await applyDeliveryEdit(sql, {
     batch, ids: [a], qtys: [9],
-    invoice: `INV-OTHER-${TAG}`, supplier: null,
+    invoice: `INV-OTHER-${TAG}`, supplier: null, affectsStock: true,
   });
   assert.equal(rows.length, 0, "a duplicate invoice must be refused");
   assert.deepEqual((await delivery(batch)).lines, beforeDupe.lines,
@@ -150,17 +150,49 @@ try {
   /* ---- 5. keeping its own invoice is not a duplicate ---- */
   rows = await applyDeliveryEdit(sql, {
     batch, ids: [a, c], qtys: [9, 2],
-    invoice: `INV-${TAG}`, supplier: "Republic National",
+    invoice: `INV-${TAG}`, supplier: "Republic National", affectsStock: true,
   });
   assert.equal(rows.length, 2, "a delivery must be allowed to keep its own invoice number");
   assert.equal((await delivery(batch)).supplier, "Republic National",
     "editing only the paperwork must still save");
   assert.equal(await store(a), 19, "a paperwork-only edit must not move stock at all");
 
+  /* ---- 6. a paperwork-only delivery leaves stock alone through every edit ---- */
+  // Set up a separate paperwork batch: moves are inserted directly, store is NOT updated.
+  const paperBatch = `D${TAG}-P`;
+  const pA = await bottle("PA", 10);
+  const pB = await bottle("PB", 10);
+  for (const [id, qty] of [[pA, 3], [pB, 2]]) {
+    await sql`
+      insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name,
+                         batch, invoice, supplier, affects_stock)
+      select 'receive', id, name, cat, ${qty}, 'store', ${userId}, ${userName},
+             ${paperBatch}, ${"PINV-" + TAG}, 'Breakthru', false
+      from items where id = ${id}`;
+  }
+  assert.equal(await store(pA), 10, "paperwork booking must not touch stock on insert");
+  assert.equal(await store(pB), 10);
+
+  // Rewriting the paperwork delivery (change pA qty, drop pB, add pC) must leave stock put.
+  const pC = await bottle("PC", 10);
+  rows = await applyDeliveryEdit(sql, {
+    batch: paperBatch, ids: [pA, pC], qtys: [7, 4],
+    invoice: `PINV-${TAG}`, supplier: "Breakthru", affectsStock: false,
+  });
+  assert.equal(rows.length, 2, "paperwork edit still rewrites its own lines");
+  assert.equal(await store(pA), 10, "paperwork edit must not raise pA (change was +4 on paper)");
+  assert.equal(await store(pB), 10, "paperwork edit must not credit back a dropped line");
+  assert.equal(await store(pC), 10, "paperwork edit must not add stock for an added line");
+  // And its flag is preserved on the rewritten rows.
+  const [{ ap }] = await sql`
+    select bool_and(affects_stock) as ap from moves where batch = ${paperBatch}`;
+  assert.equal(ap, false, "paperwork stays paperwork across edits");
+
   console.log(
     "delivery edit ok - store moves by the difference on raise, drop and add; "
     + "date and booker survive a correction; refused edits (negative stock, duplicate "
-    + "invoice) leave both the stock and the delivery completely untouched"
+    + "invoice) leave both the stock and the delivery completely untouched; paperwork "
+    + "deliveries edit without moving stock, and the flag survives the edit"
   );
 } finally {
   await sql`delete from moves where batch in (${batch}, ${otherBatch})`;

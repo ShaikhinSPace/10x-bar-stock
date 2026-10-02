@@ -17,6 +17,8 @@ export type MoveRow = Record<string, unknown> & {
   loc: string | null;
   to_loc: string | null;
   from_val: string | number | null;
+  /** false only on paperwork-only delivery receives; everything else is a real stock move. */
+  affects_stock?: boolean | null;
 };
 
 /** null means it worked; anything else is why it was refused. */
@@ -24,6 +26,7 @@ export type UndoRefusal =
   | { reason: "counted" }
   | { reason: "superseded" }
   | { reason: "short" }
+  | { reason: "gone" }
   | null;
 
 /**
@@ -35,17 +38,26 @@ export type UndoRefusal =
  *
  * A count is not a delta - it sets an absolute figure. So nothing from before a count
  * can be pulled out from under it ("counted"), and a count itself only reverses while
- * it is still the last word on that bottle ("superseded").
+ * nothing was logged after it on that bottle ("superseded"). "After" is by id, i.e.
+ * logging order: a count dated to a past day is still the last thing that happened.
  *
  * Anything that would drive a location below zero is refused outright ("short") rather
  * than clamped: the stock has genuinely moved on, and silently absorbing the shortfall
  * would put a number in the system that nobody counted.
+ *
+ * Atomic: the move is deleted and the stock reversed in ONE statement. The delete
+ * carries the guard, the update runs only if the delete took a row, and a second
+ * concurrent undo of the same move blocks on the row lock, finds it gone, and does
+ * nothing - so a double tap can never reverse a move twice.
  */
 export async function applyUndo(sql: Sql, m: MoveRow): Promise<UndoRefusal> {
+  const [stillThere] = await sql`select 1 as ok from moves where id = ${m.id}`;
+  if (!stillThere) return { reason: "gone" };
+
   if (m.type === "count") {
-    const [newest] = await sql`
-      select id from moves where item_id = ${m.item_id} order by ts desc, id desc limit 1`;
-    if (Number(newest.id) !== Number(m.id)) return { reason: "superseded" };
+    const [later] = await sql`
+      select 1 as ok from moves where item_id = ${m.item_id} and id > ${m.id}::bigint limit 1`;
+    if (later) return { reason: "superseded" };
   } else {
     const [counted] = await sql`
       select id from moves
@@ -55,74 +67,109 @@ export async function applyUndo(sql: Sql, m: MoveRow): Promise<UndoRefusal> {
     if (counted) return { reason: "counted" };
   }
 
-  // Each branch refuses rather than going negative; `returning id` coming back
-  // empty is how that surfaces. The `else ${qty}` fallbacks make the guard
-  // trivially true for the locations a given move type never subtracts from.
+  // Each branch refuses rather than going negative: its delete's guard fails, nothing is
+  // deleted, the update sees an empty `del`, and `returning id` comes back empty. The
+  // `else ${qty}` fallbacks make a guard trivially true for locations a move never
+  // subtracts from. Reversing a bar's total says nothing about how it splits across
+  // bottles, so any bar the move touched also loses its breakdown, in the same update.
   let applied;
   if (m.type === "give") {
     applied = await sql`
+      with del as (
+        delete from moves where id = ${m.id}::bigint
+          and exists (select 1 from items where id = ${m.item_id}
+            and case ${m.loc}::text
+                  when 'patio' then patio when 'back' then back else ${m.qty}::numeric
+                end >= ${m.qty})
+        returning id
+      )
       update items set
         store = store + ${m.qty},
         patio = patio - case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
-        back  = back  - case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-      where id = ${m.item_id}
-        and case ${m.loc}::text
-              when 'patio' then patio when 'back' then back else ${m.qty}::numeric
-            end >= ${m.qty}
+        back  = back  - case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end,
+        patio_levels = case when ${m.loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+        back_levels  = case when ${m.loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
+      where id = ${m.item_id} and exists (select 1 from del)
       returning id`;
   } else if (m.type === "receive") {
-    applied = await sql`
-      update items set store = store - ${m.qty}
-      where id = ${m.item_id} and store >= ${m.qty}
-      returning id`;
+    // A receive lands where m.loc says: the storeroom (a delivery, or loc null on old
+    // rows) or, via the owner's day editor, straight onto a bar. Take it back from there.
+    // Paperwork-only delivery lines (affects_stock = false) never moved stock in the
+    // first place, so the undo just deletes the row — the item stays untouched, and
+    // the guard that stops a real undo going negative has nothing to check.
+    if (m.affects_stock === false) {
+      applied = await sql`delete from moves where id = ${m.id}::bigint returning id`;
+    } else {
+      applied = await sql`
+        with del as (
+          delete from moves where id = ${m.id}::bigint
+            and exists (select 1 from items where id = ${m.item_id}
+              and case coalesce(${m.loc}::text, 'store')
+                    when 'patio' then patio when 'back' then back else store
+                  end >= ${m.qty})
+          returning id
+        )
+        update items set
+          store = store - case when coalesce(${m.loc}::text, 'store') = 'store' then ${m.qty}::numeric else 0 end,
+          patio = patio - case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
+          back  = back  - case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end,
+          patio_levels = case when ${m.loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+          back_levels  = case when ${m.loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
+        where id = ${m.item_id} and exists (select 1 from del)
+        returning id`;
+    }
   } else if (m.type === "waste") {
     // Putting wasted stock back can never go negative.
     applied = await sql`
+      with del as (delete from moves where id = ${m.id}::bigint returning id)
       update items set
         store = store + case when ${m.loc}::text = 'store' then ${m.qty}::numeric else 0 end,
         patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
-        back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-      where id = ${m.item_id}
+        back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end,
+        patio_levels = case when ${m.loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+        back_levels  = case when ${m.loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
+      where id = ${m.item_id} and exists (select 1 from del)
       returning id`;
   } else if (m.type === "transfer") {
     applied = await sql`
+      with del as (
+        delete from moves where id = ${m.id}::bigint
+          and exists (select 1 from items where id = ${m.item_id}
+            and case ${m.to_loc}::text
+                  when 'store' then store when 'patio' then patio when 'back' then back
+                  else ${m.qty}::numeric
+                end >= ${m.qty})
+        returning id
+      )
       update items set
         store = store + case when ${m.loc}::text = 'store' then ${m.qty}::numeric else 0 end
                       - case when ${m.to_loc}::text = 'store' then ${m.qty}::numeric else 0 end,
         patio = patio + case when ${m.loc}::text = 'patio' then ${m.qty}::numeric else 0 end
                       - case when ${m.to_loc}::text = 'patio' then ${m.qty}::numeric else 0 end,
         back  = back  + case when ${m.loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-                      - case when ${m.to_loc}::text = 'back'  then ${m.qty}::numeric else 0 end
-      where id = ${m.item_id}
-        and case ${m.to_loc}::text
-              when 'store' then store when 'patio' then patio when 'back' then back
-              else ${m.qty}::numeric
-            end >= ${m.qty}
+                      - case when ${m.to_loc}::text = 'back'  then ${m.qty}::numeric else 0 end,
+        patio_levels = case when 'patio' in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
+                            then '{}'::numeric[] else patio_levels end,
+        back_levels  = case when 'back'  in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
+                            then '{}'::numeric[] else back_levels end
+      where id = ${m.item_id} and exists (select 1 from del)
       returning id`;
   } else {
     // A count restores the figure that was true before it, so it is always safe.
     applied = await sql`
+      with del as (delete from moves where id = ${m.id}::bigint returning id)
       update items set
         store = case when ${m.loc}::text = 'store' then ${m.from_val} else store end,
         patio = case when ${m.loc}::text = 'patio' then ${m.from_val} else patio end,
-        back  = case when ${m.loc}::text = 'back'  then ${m.from_val} else back  end
-      where id = ${m.item_id}
+        back  = case when ${m.loc}::text = 'back'  then ${m.from_val} else back  end,
+        patio_levels = case when ${m.loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+        back_levels  = case when ${m.loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
+      where id = ${m.item_id} and exists (select 1 from del)
       returning id`;
   }
 
-  if (!applied.length) return { reason: "short" };
-
-  // Reversing a bar's total says nothing about how it splits across bottles - even
-  // undoing a bottle-by-bottle count only restores the scalar - so any bar this move
-  // touched loses its breakdown. Done once here rather than in all five branches.
-  await sql`
-    update items set
-      patio_levels = case when 'patio' in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
-                          then '{}'::numeric[] else patio_levels end,
-      back_levels  = case when 'back'  in (coalesce(${m.loc}::text, ''), coalesce(${m.to_loc}::text, ''))
-                          then '{}'::numeric[] else back_levels end
-    where id = ${m.item_id}`;
-
-  await sql`delete from moves where id = ${m.id}`;
-  return null;
+  if (applied.length) return null;
+  // Nothing applied: either the guard refused, or a concurrent undo got there first.
+  const [left] = await sql`select 1 as ok from moves where id = ${m.id}::bigint`;
+  return left ? { reason: "short" } : { reason: "gone" };
 }

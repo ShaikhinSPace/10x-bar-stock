@@ -36,7 +36,7 @@ export function Activity({
       const base = [d.toLocaleDateString("en-US"), timeStr(+d)];
       const extra = [m.notes ?? m.invoice ?? "", m.supplier ?? ""];
       if (m.type === "give") rows.push([...base, "GIVE OUT", m.item_name, m.cat, m.qty ?? 0, m.loc ? LOC_LABEL[m.loc] : "Unknown bar", m.user_name, ...extra]);
-      else if (m.type === "receive") rows.push([...base, m.batch ? "DELIVERY" : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc ?? "store"], m.user_name, ...extra]);
+      else if (m.type === "receive") rows.push([...base, m.batch ? (m.affects_stock ? "DELIVERY" : "DELIVERY (PAPERWORK)") : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc ?? "store"], m.user_name, ...extra]);
       else if (m.type === "waste") rows.push([...base, "WASTAGE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "transfer") rows.push([...base, "TRANSFER", m.item_name, m.cat, m.qty ?? 0, `${LOC_LABEL[m.loc!]} -> ${LOC_LABEL[m.to_loc!]}`, m.user_name, ...extra]);
       else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
@@ -104,7 +104,9 @@ export function Activity({
             : m.loc ?? "store";
 
           const tagLabel = m.type === "receive"
-              ? (m.batch ? "Delivery" : m.loc && m.loc !== "store" ? `Received (${LOC_SHORT[m.loc]})` : "Received")
+              ? (m.batch
+                  ? (m.affects_stock ? "Delivery" : "Delivery (paperwork)")
+                  : m.loc && m.loc !== "store" ? `Received (${LOC_SHORT[m.loc]})` : "Received")
             : m.type === "waste" ? `Wasted (${LOC_SHORT[m.loc!]})`
             : m.type === "transfer" ? `${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
             : m.type === "give" && !m.loc ? "Unknown"
@@ -183,7 +185,7 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const n = Number(qty);
   // All whole bottles (the store is sealed bottles) on a chosen day. give/receive need
   // >= 1; a store count may be 0 (an emptied storeroom).
-  const valid = !!item && Number.isInteger(n) && !!dateStr
+  const valid = !!item && Number.isInteger(n) && !!dateStr && qty.trim() !== ""
     && (isCount ? n >= 0 : n >= 1);
 
   function atMsFor(ds: string): number {

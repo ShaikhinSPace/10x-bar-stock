@@ -90,10 +90,10 @@ export async function giveRun(
     const rows = await applyGiveRun(sql, { ids, qtys, to, userId: u.id, userName: u.name });
 
     if (!rows.length) {
-      throw new Error("Not enough in the storeroom for this run — receive stock or lower a quantity.");
-    }
-    if (rows.length !== ids.length) {
-      throw new Error("Some bottles are no longer on the list — reload and try the run again.");
+      throw new Error(
+        "Not enough in the storeroom for this run, or a bottle is no longer on the list — "
+        + "reload, receive stock or lower a quantity."
+      );
     }
     refresh();
   });
@@ -273,6 +273,7 @@ export async function undoMove(moveId: number): Promise<Result> {
     // Shared with scripts/check-undo.mjs, which runs this exact logic against a
     // real database — see the module for which moves can be reversed and why.
     const refused = await applyUndo(sql, m as Parameters<typeof applyUndo>[1]);
+    if (refused?.reason === "gone") throw new Error("That entry is already gone.");
     if (refused?.reason === "counted") {
       throw new Error(
         "This bottle has been counted since, and the count is now the truth. "

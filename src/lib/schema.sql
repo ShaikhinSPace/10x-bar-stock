@@ -114,6 +114,13 @@ alter table moves add column if not exists supplier text;
 alter table moves add column if not exists notes    text; -- waste reasons, comments
 alter table moves add column if not exists to_loc   text; -- transfer destination
 
+-- Paperwork-only deliveries: the owner already received the drop manually (bottle-by-bottle
+-- through Receive) and counted the bar, and only later books the delivery for the invoice
+-- and supplier record. Without this flag, the booking would add the stock a SECOND time.
+-- Default true so every existing move is a real stock move; a paperwork delivery sets
+-- false on every one of its receive moves, and undo/edit/reports all treat them as logs.
+alter table moves add column if not exists affects_stock boolean not null default true;
+
 alter table moves drop constraint if exists moves_type_check;
 alter table moves add constraint moves_type_check check (type in ('give', 'receive', 'count', 'waste', 'transfer'));
 

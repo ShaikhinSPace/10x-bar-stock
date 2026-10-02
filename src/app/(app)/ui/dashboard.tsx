@@ -32,7 +32,7 @@ export function Dashboard({
   // What the bars were counted DOWN over the week — product poured, sold, or gone.
   // This is how usage shows up on nights you just count instead of logging pours.
   const poured7 = moves
-    .filter((m) => m.type === "count" && +new Date(m.ts) >= since)
+    .filter((m) => m.type === "count" && m.loc !== "store" && +new Date(m.ts) >= since)
     .reduce((a, m) => a + Math.max(0, (m.from_val ?? 0) - (m.to_val ?? 0)), 0);
 
   return (

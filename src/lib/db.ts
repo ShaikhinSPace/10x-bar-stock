@@ -55,7 +55,7 @@ export async function getItems(): Promise<Item[]> {
 export async function getRecentMoves(sinceMs: number): Promise<Move[]> {
   const rows = await sql`
     select id, ts, type, item_id, item_name, cat, qty, loc, to_loc, from_val, to_val,
-           user_name, batch, invoice, supplier, notes
+           user_name, batch, invoice, supplier, notes, affects_stock
     from moves where ts >= ${new Date(sinceMs).toISOString()}
     order by ts desc, id desc`;
   return rows.map(toMove);
@@ -96,7 +96,7 @@ export async function getCategories(): Promise<Category[]> {
 export async function getMoves(limit = 500): Promise<Move[]> {
   const rows = await sql`
     select id, ts, type, item_id, item_name, cat, qty, loc, to_loc, from_val, to_val,
-           user_name, batch, invoice, supplier, notes
+           user_name, batch, invoice, supplier, notes, affects_stock
     from moves order by ts desc, id desc limit ${limit}`;
   return rows.map(toMove);
 }
@@ -112,6 +112,8 @@ const toMove = (r: Row): Move => ({
   invoice: (r.invoice ?? null) as string | null,
   supplier: (r.supplier ?? null) as string | null,
   notes: (r.notes ?? null) as string | null,
+  // Every pre-flag row is a real stock move, so a null default matches the schema.
+  affects_stock: r.affects_stock !== false,
 });
 
 
@@ -124,11 +126,13 @@ export async function getDeliveries(limit = 100): Promise<Delivery[]> {
     select batch, invoice, supplier,
            min(ts) as ts, min(user_name) as user_name, min(user_id) as user_id,
            sum(qty) as bottles,
+           -- A delivery's lines all share one affects_stock, so bool_and == bool_or == the flag.
+           bool_and(affects_stock) as affects_stock,
            json_agg(json_build_object(
                       'item_id', item_id, 'item', item_name, 'cat', cat, 'qty', qty)
                     order by item_name) as lines
     from moves
-    where batch is not null
+    where batch is not null and type = 'receive'
     group by batch, invoice, supplier
     order by min(ts) desc
     limit ${limit}`;
@@ -137,6 +141,7 @@ export async function getDeliveries(limit = 100): Promise<Delivery[]> {
     ts: new Date(r.ts).toISOString(), user_name: r.user_name,
     user_id: r.user_id === null ? null : Number(r.user_id),
     bottles: Number(r.bottles),
+    affects_stock: r.affects_stock !== false,
     lines: (r.lines as { item_id: number; item: string; cat: Item["cat"]; qty: string }[])
       .map((l) => ({ item_id: Number(l.item_id), item: l.item, cat: l.cat, qty: Number(l.qty) })),
   }));
