@@ -80,3 +80,23 @@ Checked and clean:
 - `src/app/actions/stock.ts:182`, `deliveries.ts:43` and `users.ts:19` — free-text fields (`reason`, `supplier`, `name`) have no length cap. Invoice is capped at 60 and item name at 80, so these are inconsistent. **low** — cap at ~120 chars.
 - `src/app/(app)/ui/stock.tsx:451-458` — `localStorage.getItem` runs inside a `useState` initializer, which is a hydration hazard if `Stocktake` is ever rendered on the server. It is safe today because it only mounts after a click. **low** — keep the existing comment, or read it in an effect.
 - `src/app/(app)/layout.tsx:10` and `src/app/(app)/guard.ts:20` — the session lookup hits the DB on every layout render and again on every page render, so there are two identical `users` queries per navigation. **low** — wrap `getSession` in `React.cache()`.
+
+---
+
+# Round 3 — /code-review on PR #6 (deferred, logged for later)
+
+Correctness bugs from this round (undo semantics for paperwork + backdated counts, plus
+the misleading rename error) were fixed in the same branch. These are the lower-severity
+items the reviewer surfaced that are not yet addressed.
+
+## Low
+
+- `src/app/actions/deliveries.ts:54` — the paperwork path still acquires row locks on every bottle via the UPDATE (just to add 0 to `store`), which can briefly serialize concurrent paperwork bookings against the barback's `giveOut` on hot items. **low** — guard the UPDATE under `and ${affects}::boolean` and source the INSERT via a `union all` CTE for the paperwork case.
+- `src/lib/undo-move.ts:47` — the leading `select 1 from moves where id = m.id` pre-check is redundant with the post-check that already distinguishes `short` from `gone`, and adds one round-trip per undo. **low** — drop the pre-check; keep the post-check.
+- `src/lib/auth.ts:48` — `recordLoginFailure` reads-then-writes without a transaction, so two simultaneous fails can both read `fails=4` and both UPSERT `fails=5` — under-counts by one. Known/accepted for the 10-staff bar; the comment calls it harmless. **low** — if this ever faces the open internet, rewrite as one atomic `insert … on conflict do update set fails = login_attempts.fails + 1`.
+- `src/app/actions/categories.ts:25` — `createCategory` picks `coalesce(max(sort), 0) + 1`, which can collide if two owners create a category at the same moment. **low** — add a unique index on sort or do the insert inside an advisory lock; harmless for a single owner.
+- `src/app/actions/categories.ts:85` — `deleteCategory` reads `inUse` outside a transaction, so a concurrent action on `from` could change what gets folded into `into`. **low** — wrap the preflight read, inUse count, and merge in one `sql.transaction` (and keep the FK-check inUse read inside it).
+- `src/app/actions/categories.ts:109` — `moveCategory` returns ok at the ends-of-list edges without calling `refresh()`. Minor UX: a user tapping the arrow at the top may think nothing is happening (because nothing is). **low** — return an explicit "nothing to do" signal or refresh unconditionally.
+- `src/lib/schema.sql:32` — `sort` has no default and no NOT NULL; a future direct `insert into categories (name) …` would leave sort NULL and sort last/first unpredictably. **low** — add `default (select coalesce(max(sort), 0) + 1 from categories)` or `not null` after the backfill runs.
+- `src/app/(app)/ui/activity.tsx:219` — client caps `atMs` with its own `Date.now()`, server enforces its own `Date.now() + 5min` — a far-skewed client clock can land a same-day entry in the server's "future" and get refused. **low** — not worth fixing until clock skew is reported in practice.
+- `src/lib/report.ts:90` — `onHandAt`'s unknown-bar give branch treats every `loc IS NULL` give as "unknown", including any legacy nulls that predate the feature. On this database, every give before the feature was `patio`/`back`, so no legacy nulls exist, but worth noting if an import ever lands rows with null loc. **low** — if it matters, scope by `created_at > <feature date>` or by a schema version.

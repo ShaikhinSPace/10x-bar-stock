@@ -38,8 +38,14 @@ export type UndoRefusal =
  *
  * A count is not a delta - it sets an absolute figure. So nothing from before a count
  * can be pulled out from under it ("counted"), and a count itself only reverses while
- * nothing was logged after it on that bottle ("superseded"). "After" is by id, i.e.
- * logging order: a count dated to a past day is still the last thing that happened.
+ * nothing was logged after it on that bottle ("superseded"). Both checks are by id —
+ * logging order — not by ts: the day editor backdates `ts` to a chosen business day,
+ * so a count logged after a give has the newer id but may have the older ts. Judging
+ * by ts there would let a backdated count sit silently on top of a give and let its
+ * undo pass this guard, leaving the stock at a figure nobody counted.
+ *
+ * A paperwork-only receive (affects_stock = false) never moved stock, so no later
+ * count depends on its figure — the counted-guard is skipped and it stays undoable.
  *
  * Anything that would drive a location below zero is refused outright ("short") rather
  * than clamped: the stock has genuinely moved on, and silently absorbing the shortfall
@@ -51,18 +57,14 @@ export type UndoRefusal =
  * nothing - so a double tap can never reverse a move twice.
  */
 export async function applyUndo(sql: Sql, m: MoveRow): Promise<UndoRefusal> {
-  const [stillThere] = await sql`select 1 as ok from moves where id = ${m.id}`;
-  if (!stillThere) return { reason: "gone" };
-
   if (m.type === "count") {
     const [later] = await sql`
       select 1 as ok from moves where item_id = ${m.item_id} and id > ${m.id}::bigint limit 1`;
     if (later) return { reason: "superseded" };
-  } else {
+  } else if (m.affects_stock !== false) {
     const [counted] = await sql`
       select id from moves
-      where item_id = ${m.item_id} and type = 'count'
-        and (ts, id) > (${m.ts}::timestamptz, ${m.id}::bigint)
+      where item_id = ${m.item_id} and type = 'count' and id > ${m.id}::bigint
       limit 1`;
     if (counted) return { reason: "counted" };
   }

@@ -55,7 +55,16 @@ export async function renameCategory(from: string, raw: string): Promise<Result>
       where name = ${from}
         and not exists (select 1 from categories where name = ${to})
       returning name`;
-    if (!rows.length) throw new Error(`${to} already exists`);
+    if (!rows.length) {
+      // Either `from` got merged away between the preflight read and this UPDATE,
+      // or `to` already exists. Re-read so the message names the real cause.
+      const [{ gone, taken }] = await sql`
+        select not exists (select 1 from categories where name = ${from}) as gone,
+               exists     (select 1 from categories where name = ${to})   as taken`;
+      if (gone) throw new Error("That category is already gone.");
+      if (taken) throw new Error(`${to} already exists`);
+      throw new Error("Rename failed — reload and try again.");
+    }
     refresh();
   });
 }

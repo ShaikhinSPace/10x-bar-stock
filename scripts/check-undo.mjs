@@ -182,6 +182,38 @@ try {
   assert.equal(await applyUndo(sql, await move(c10.id)), null, "backdated count undoes");
   assert.deepEqual(await at(b10), { store: 10, patio: 0, back: 0 });
 
+  /* ---- 11. a BACKDATED count still freezes earlier gives (compared by id, not ts) ---- */
+  const back = await bottle("Back", 10);
+  await sql`update items set store = store - 2, patio = patio + 2 where id = ${back}`;
+  const backGive = await log(back, { type: "give", qty: 2, loc: "patio" });
+  // Count overwrites the storeroom AFTER the give (newer id), but is dated 3 days earlier.
+  await sql`update items set store = 5 where id = ${back}`;
+  const backCount = await log(back, { type: "count", loc: "store", from_val: 8, to_val: 5 });
+  await sql`update moves set ts = ts - interval '3 days' where id = ${backCount.id}`;
+  const after11 = await at(back);
+  assert.deepEqual(await applyUndo(sql, await move(backGive.id)), { reason: "counted" },
+    "a count logged after a give (by id) must block that give's undo, even if the count's ts is older");
+  assert.deepEqual(await at(back), after11, "and must leave stock exactly as it was");
+
+  /* ---- 12. a paperwork receive is always undoable, even with a later count on the same bottle ---- */
+  const paper = await bottle("Paper", 10);
+  // Paperwork receive: insert WITHOUT changing stock, affects_stock=false.
+  const [paperRow] = await sql`
+    insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name,
+                       batch, invoice, affects_stock)
+    select 'receive', id, name, cat, 5, 'store', ${userId}, ${userName},
+           ${"B" + TAG + "p"}, ${"INV" + TAG + "p"}, false
+    from items where id = ${paper} returning *`;
+  // Later, a bar count on the same bottle:
+  await sql`update items set patio = 3 where id = ${paper}`;
+  await log(paper, { type: "count", loc: "patio", from_val: 0, to_val: 3 });
+  assert.equal(await applyUndo(sql, paperRow), null,
+    "a paperwork receive moved no stock, so a later count does not depend on it — undo must succeed");
+  const [{ n: paperLeft }] = await sql`select count(*) as n from moves where id = ${paperRow.id}`;
+  assert.equal(Number(paperLeft), 0, "and the paperwork row is deleted");
+  assert.deepEqual(await at(paper), { store: 10, patio: 3, back: 0 },
+    "the storeroom stays untouched (paperwork never raised it)");
+
   console.log(
     "undo ok - an older give reverses exactly with newer gives on top; a count freezes "
     + "what is under it and only reverses while it is the last word; another bottle's "

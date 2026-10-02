@@ -128,10 +128,12 @@ export type WastageReason = (typeof WASTAGE_REASONS)[number];
  * Which moves undo will actually accept, mirroring applyUndo's rule so a link is
  * never offered on something that would then be refused.
  *
- * give/receive/waste/transfer are deltas and deltas commute, so one stays undoable
- * until its bottle is counted at a later (ts, id). A count sets an absolute figure, so
- * it only reverses while nothing was logged after it on that bottle - judged by id
- * (logging order), so a count dated to a past day is still the last word.
+ * Both checks are by id — logging order — not by `ts`: the day editor can backdate a
+ * count's `ts` to any business day, and judging "after" by ts there would hide a
+ * backdated count sitting on top of a give. A count undoes only while it is the newest
+ * move on its bottle (max id); a non-count undoes while no count on the same bottle
+ * has a higher id. Paperwork receives (affects_stock = false) moved no stock, so no
+ * count depends on them — they are always undoable.
  *
  * Order of `moves` doesn't matter, but it must not be filtered by type - a count
  * hidden by a filter still has to freeze the gives underneath it. Any window works as
@@ -139,17 +141,23 @@ export type WastageReason = (typeof WASTAGE_REASONS)[number];
  */
 export function undoableMoveIds(moves: Move[]): Set<number> {
   const maxId = new Map<number, number>();
-  const lastCount = new Map<number, Move>();
-  const later = (a: Move, b: Move) => a.ts > b.ts || (a.ts === b.ts && a.id > b.id);
+  const lastCountId = new Map<number, number>();
   for (const m of moves) {
     if (m.id > (maxId.get(m.item_id) ?? 0)) maxId.set(m.item_id, m.id);
-    const c = lastCount.get(m.item_id);
-    if (m.type === "count" && (!c || later(m, c))) lastCount.set(m.item_id, m);
+    if (m.type === "count" && m.id > (lastCountId.get(m.item_id) ?? 0)) {
+      lastCountId.set(m.item_id, m.id);
+    }
   }
   const ok = new Set<number>();
   for (const m of moves) {
-    const c = lastCount.get(m.item_id);
-    if (m.type === "count" ? maxId.get(m.item_id) === m.id : !c || !later(c, m)) ok.add(m.id);
+    if (m.type === "count") {
+      if (maxId.get(m.item_id) === m.id) ok.add(m.id);
+    } else if (m.affects_stock === false) {
+      ok.add(m.id); // paperwork receive — no stock to freeze, always undoable
+    } else {
+      const c = lastCountId.get(m.item_id);
+      if (!c || c < m.id) ok.add(m.id);
+    }
   }
   return ok;
 }

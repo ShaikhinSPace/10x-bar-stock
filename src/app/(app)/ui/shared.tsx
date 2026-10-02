@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { LOCS, LOC_SHORT, WASTAGE_REASONS, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser, type WastageReason } from "@/lib/model";
-import { countBarBottles, giveOut, logWaste, receive, transferBar, undoMove, type Result } from "../../actions";
+import { countBarBottles, countStore, giveOut, logWaste, receive, transferBar, undoMove, type Result } from "../../actions";
 import { useAction } from "../shell";
 
 type SheetAct = "give" | "receive" | "transfer" | "waste" | "count";
@@ -159,9 +159,13 @@ function Sheet({
   useEscapeClose(onClose);
   const [act, setAct] = useState<SheetAct>("give");
 
-  const [bar, setBar] = useState<Loc | null>(null);
+  // Give target: a bar, "unknown" (parity with Activity's day editor — stock left
+  // the storeroom but you don't remember which bar), or null for "not picked yet".
+  const [bar, setBar] = useState<Loc | "unknown" | null>(null);
   const [giveQty, setGiveQty] = useState(1);
   const [recvQty, setRecvQty] = useState(1);
+  // Receive target: store (a delivery, the common case) or a bar (parity with the day editor).
+  const [recvLoc, setRecvLoc] = useState<Loc>("store");
 
   // Transfer state. Quantity is text, not a number, for the same reason Count's is:
   // bar-to-bar transfers are partial (0.25 steps, same as a bar count), so the field
@@ -181,18 +185,24 @@ function Sheet({
   const wasteQty = Number(wasteQtyStr) || 0;
   const wasteIsBar = wasteLoc !== "store";
 
-  // Count state. Only the bars are counted — a row per open bottle, seeded from the
-  // last bottle-by-bottle count so a recount starts from what's already known. The
-  // storeroom isn't counted: it's whole sealed bottles whose total is fixed by the
-  // deliveries in and gives out, so there's nothing to recount there.
+  // Count state. Bar counts are bottle-by-bottle (a row per open bottle, seeded from
+  // the last breakdown) because a bar can have several open at different levels; the
+  // storeroom counts a single scalar (whole sealed bottles). Owner-only on store, so
+  // that store-count stays an intentional reconciliation, not an "oh I'll just type
+  // whatever" that masks real leakage. Bar counts stay staff-accessible.
   const [countLoc, setCountLoc] = useState<Loc>("patio");
   const [bottles, setBottles] = useState<string[]>(() => seedBottles(item, "patio"));
+  const [storeCountStr, setStoreCountStr] = useState<string>(() => fmt(item.store));
+  const storeCount = Number(storeCountStr);
+  const storeCountValid = Number.isInteger(storeCount) && storeCount >= 0;
+  const storeDelta = storeCountValid ? Math.round((storeCount - item.store) * 100) / 100 : 0;
 
   const presets = item.cat === "BEER" ? [1, 6, 12, 24] : [1, 2, 3, 6];
   const barLevels = bottles.map(Number).filter((n) => Number.isFinite(n) && n > 0);
   const barTotal = Math.round(barLevels.reduce((a, n) => a + n, 0) * 100) / 100;
   const countedBottles = barLevels.length;
-  const barDelta = Math.round((barTotal - item[countLoc]) * 100) / 100;
+  const barDelta = Math.round((barTotal - item[countLoc === "store" ? "patio" : countLoc]) * 100) / 100;
+  const countLocs: Loc[] = user.role === "owner" ? ["store", "patio", "back"] : ["patio", "back"];
 
   return (
     <div className="sheet-in">
@@ -238,18 +248,21 @@ function Sheet({
         <div>
           <div className="lbl">To which bar?</div>
           <div className="pickrow">
-            {(["patio", "back"] as Loc[]).map((b) => (
+            {(["patio", "back", "unknown"] as const).map((b) => (
               <button key={b} data-t={b} className={`pick${bar === b ? " sel" : ""}`}
                 onClick={() => setBar(b)}>
-                <span className="bd" style={{ background: LOC_COLOR[b] }} />{LOC_SHORT[b]}
+                {b === "unknown"
+                  ? <><span className="bd" style={{ background: "var(--line)" }} />Not sure</>
+                  : <><span className="bd" style={{ background: LOC_COLOR[b] }} />{LOC_SHORT[b]}</>}
               </button>
             ))}
           </div>
           <div className="lbl">How many bottles?</div>
           <QtyPicker qty={giveQty} setQty={setGiveQty} presets={presets} />
           <button className="commit" disabled={!bar || pending}
-            onClick={() => run(() => giveOut(item.id, giveQty, bar!),
-              `${fmtQty(item.cat, giveQty)} × ${item.name} → ${LOC_SHORT[bar!]}`)}>
+            onClick={() => run(
+              () => giveOut(item.id, giveQty, bar === "unknown" ? null : bar!),
+              `${fmtQty(item.cat, giveQty)} × ${item.name} → ${bar === "unknown" ? "unknown bar" : LOC_SHORT[bar as Loc]}`)}>
             {pending ? "Giving…" : "Give out"}
           </button>
         </div>
@@ -257,11 +270,27 @@ function Sheet({
 
       {act === "receive" && (
         <div>
-          <div className="lbl">Add to store</div>
+          <div className="lbl">Receive into</div>
+          <div className="pickrow">
+            {LOCS.map((k) => (
+              <button key={k} data-t={k} className={`pick${recvLoc === k ? " sel" : ""}`}
+                onClick={() => setRecvLoc(k)}>
+                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+              </button>
+            ))}
+          </div>
+          <div className="lbl">How many bottles?</div>
           <QtyPicker qty={recvQty} setQty={setRecvQty} presets={presets} />
+          {recvLoc !== "store" && (
+            <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
+              Delivered straight to {LOC_SHORT[recvLoc]} — the bar&apos;s open-bottle breakdown
+              resets since the new bottles&apos; composition isn&apos;t known.
+            </div>
+          )}
           <button className="commit green" disabled={pending}
-            onClick={() => run(() => receive(item.id, recvQty), `+${fmtQty(item.cat, recvQty)} × ${item.name} received`)}>
-            {pending ? "Adding…" : "Add to store"}
+            onClick={() => run(() => receive(item.id, recvQty, recvLoc),
+              `+${fmtQty(item.cat, recvQty)} × ${item.name} → ${LOC_SHORT[recvLoc]}`)}>
+            {pending ? "Adding…" : recvLoc === "store" ? "Add to store" : `Add to ${LOC_SHORT[recvLoc]}`}
           </button>
         </div>
       )}
@@ -367,33 +396,71 @@ function Sheet({
 
       {act === "count" && (
         <div>
-          <div className="lbl">Count which bar?</div>
+          <div className="lbl">Count which location?</div>
           <div className="pickrow">
-            {(["patio", "back"] as Loc[]).map((k) => (
+            {countLocs.map((k) => (
               <button key={k} data-t={k} className={`pick${countLoc === k ? " sel" : ""}`}
-                onClick={() => { setCountLoc(k); setBottles(seedBottles(item, k)); }}>
+                onClick={() => {
+                  setCountLoc(k);
+                  if (k === "store") setStoreCountStr(fmt(item.store));
+                  else setBottles(seedBottles(item, k));
+                }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
-          <div className="lbl">Each open bottle, how full?</div>
-          <BottleLevels levels={bottles} setLevels={setBottles} />
-          <div className="cnote">
-            {barDelta === 0
-              ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmt(barTotal)}`
-              : `${LOC_SHORT[countLoc]}: ${fmt(item[countLoc])} → ${fmt(barTotal)} (${barDelta > 0 ? "+" : ""}${fmt(barDelta)})`}
-          </div>
-          <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
-            One row per bottle on the bar — 1 is full, 0.5 a half, 0.25 a quarter.
-            No adding up needed.
-          </div>
-          <button className="commit amber" disabled={pending}
-            onClick={() => run(
-              () => countBarBottles(item.id, countLoc, bottles.map(Number).filter((n) => n > 0)),
-              `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmt(barTotal)}`
-                + (countedBottles ? ` across ${countedBottles} bottle${countedBottles === 1 ? "" : "s"}` : ""))}>
-            {pending ? "Saving…" : "Set count"}
-          </button>
+
+          {countLoc === "store" ? (
+            <>
+              <div className="lbl">Counted amount</div>
+              <div className="qsel">
+                <button className="step" aria-label="One fewer"
+                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCount : 0) - 1)))}>−</button>
+                <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
+                  value={storeCountStr} onChange={(e) => setStoreCountStr(e.target.value)} />
+                <button className="step" aria-label="One more"
+                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCount : 0) + 1)))}>+</button>
+              </div>
+              <div className="cnote">
+                {!storeCountValid
+                  ? "Enter a whole number"
+                  : storeDelta === 0
+                    ? `No change — store stays at ${fmt(item.store)}`
+                    : `Store: ${fmt(item.store)} → ${fmt(storeCount)} (${storeDelta > 0 ? "+" : ""}${fmt(storeDelta)})`}
+              </div>
+              <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
+                The storeroom counts whole sealed bottles. If the counted number is lower,
+                prefer logging a Waste for the missing bottles — a count overwrites the
+                running total and hides where the loss came from.
+              </div>
+              <button className="commit amber" disabled={pending || !storeCountValid || storeDelta === 0}
+                onClick={() => run(() => countStore(item.id, storeCount),
+                  `Store count: ${item.name} = ${fmt(storeCount)}`)}>
+                {pending ? "Saving…" : "Set count"}
+              </button>
+            </>
+          ) : (
+            <>
+              <div className="lbl">Each open bottle, how full?</div>
+              <BottleLevels levels={bottles} setLevels={setBottles} />
+              <div className="cnote">
+                {barDelta === 0
+                  ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmt(barTotal)}`
+                  : `${LOC_SHORT[countLoc]}: ${fmt(item[countLoc])} → ${fmt(barTotal)} (${barDelta > 0 ? "+" : ""}${fmt(barDelta)})`}
+              </div>
+              <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
+                One row per bottle on the bar — 1 is full, 0.5 a half, 0.25 a quarter.
+                No adding up needed.
+              </div>
+              <button className="commit amber" disabled={pending}
+                onClick={() => run(
+                  () => countBarBottles(item.id, countLoc, bottles.map(Number).filter((n) => n > 0)),
+                  `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmt(barTotal)}`
+                    + (countedBottles ? ` across ${countedBottles} bottle${countedBottles === 1 ? "" : "s"}` : ""))}>
+                {pending ? "Saving…" : "Set count"}
+              </button>
+            </>
+          )}
         </div>
       )}
 
