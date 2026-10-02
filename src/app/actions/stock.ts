@@ -9,12 +9,20 @@ import { attempt, whole, partial, isLoc, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
 
-export async function giveOut(itemId: number, qty: number, to: Loc): Promise<Result> {
+/**
+ * Give out from the storeroom.
+ *
+ * `to` is a bar, OR null for "unknown bar" (parity with Activity's day editor): the
+ * stock left the storeroom but you can't remember which bar it went to, so no bar is
+ * credited and a later bar count absorbs it. The SQL already handles null — none of
+ * the `${to}::text = 'patio'/'back'` cases match, so store drops and nothing else.
+ */
+export async function giveOut(itemId: number, qty: number, to: Loc | null): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
     const q = whole(qty, "Quantity");
     if (q < 1) throw new Error("Give out at least 1 bottle");
-    if (!isLoc(to) || to === "store") throw new Error("Pick a bar");
+    if (to !== null && (!isLoc(to) || to === "store")) throw new Error("Give to a bar, or leave the bar unknown");
 
     const rows = await sql`
       with prev as (
@@ -90,30 +98,48 @@ export async function giveRun(
     const rows = await applyGiveRun(sql, { ids, qtys, to, userId: u.id, userName: u.name });
 
     if (!rows.length) {
-      throw new Error("Not enough in the storeroom for this run — receive stock or lower a quantity.");
+      throw new Error(
+        "Not enough in the storeroom for this run, or a bottle is no longer on the list — "
+        + "reload, receive stock or lower a quantity."
+      );
     }
+    // Defense-in-depth: applyGiveRun's `short` CTE is all-or-nothing, so this never fires
+    // today. Keeping the check means a future regression that lets some lines through
+    // can't silently commit a partial run.
     if (rows.length !== ids.length) {
-      throw new Error("Some bottles are no longer on the list — reload and try the run again.");
+      throw new Error("Internal error: give-run wrote a partial result. Reload and try again.");
     }
     refresh();
   });
 }
 
-export async function receive(itemId: number, qty: number): Promise<Result> {
+/**
+ * Receive stock into the storeroom (a delivery) or straight onto a bar — parity with
+ * Activity's day editor. Whole bottles only; a bar receive drops that bar's open-bottle
+ * breakdown because the new bottles' composition isn't known. loc defaults to 'store'
+ * so every pre-flag caller keeps working.
+ */
+export async function receive(itemId: number, qty: number, loc: Loc = "store"): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
     const q = whole(qty, "Quantity");
     if (q < 1) throw new Error("Receive at least 1 bottle");
+    if (!isLoc(loc)) throw new Error("Pick where it's received");
 
     const rows = await sql`
       with prev as (
         select id, name, cat from items where id = ${itemId} and not archived
       ), upd as (
-        update items set store = store + ${q}
+        update items set
+          store = store + case when ${loc}::text = 'store' then ${q}::numeric else 0 end,
+          patio = patio + case when ${loc}::text = 'patio' then ${q}::numeric else 0 end,
+          back  = back  + case when ${loc}::text = 'back'  then ${q}::numeric else 0 end,
+          patio_levels = case when ${loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+          back_levels  = case when ${loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
         where id = ${itemId} and not archived returning id
       )
       insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name)
-      select 'receive', prev.id, prev.name, prev.cat, ${q}, 'store', ${u.id}, ${u.name}
+      select 'receive', prev.id, prev.name, prev.cat, ${q}, ${loc}::text, ${u.id}, ${u.name}
       from prev join upd on upd.id = prev.id
       returning id`;
 
@@ -165,6 +191,33 @@ export async function countBarBottles(
       from prev join upd on upd.id = prev.id
       returning id`;
 
+    if (!rows.length) throw new Error("That bottle is no longer in the list.");
+    refresh();
+  });
+}
+
+/**
+ * Reconcile the storeroom for one bottle to the counted figure.
+ *
+ * Owner-only, mirroring Activity's day editor. The design keeps store = receives −
+ * gives in normal use (so leakage shows up as waste the owner has to log), but a
+ * genuine physical recount still needs a way in — this is it. Sets the store to the
+ * figure and logs a count move the dashboard reads as the drop (from_val → to_val).
+ */
+export async function countStore(itemId: number, value: number): Promise<Result> {
+  return attempt(async () => {
+    const u = await requireOwner();
+    const v = whole(value, "Counted amount");
+    const rows = await sql`
+      with prev as (
+        select id, name, cat, store as v from items where id = ${itemId} and not archived
+      ), upd as (
+        update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
+      )
+      insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
+      select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}
+      from prev join upd on upd.id = prev.id
+      returning id`;
     if (!rows.length) throw new Error("That bottle is no longer in the list.");
     refresh();
   });
@@ -273,6 +326,7 @@ export async function undoMove(moveId: number): Promise<Result> {
     // Shared with scripts/check-undo.mjs, which runs this exact logic against a
     // real database — see the module for which moves can be reversed and why.
     const refused = await applyUndo(sql, m as Parameters<typeof applyUndo>[1]);
+    if (refused?.reason === "gone") throw new Error("That entry is already gone.");
     if (refused?.reason === "counted") {
       throw new Error(
         "This bottle has been counted since, and the count is now the truth. "
@@ -315,21 +369,37 @@ export async function addEntry(
     if (type === "receive") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
+      // Receive into the storeroom (a delivery) or straight onto a bar. Whole bottles;
+      // a bar receive drops that bar's open-bottle breakdown since the new bottles'
+      // composition isn't known (same as a backdated give).
+      if (!isLoc(to)) throw new Error("Pick where it's received");
       const rows = await sql`
         with prev as (
           select id, name, cat from items where id = ${itemId} and not archived
         ), upd as (
-          update items set store = store + ${q}
+          update items set
+            store = store + case when ${to}::text = 'store' then ${q}::numeric else 0 end,
+            patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
+            back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
+            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
           where id = ${itemId} and not archived returning id
         )
         insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-        select 'receive', prev.id, prev.name, prev.cat, ${q}, 'store', ${u.id}, ${u.name}, ${tsIso}
+        select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("That bottle is no longer in the list.");
     } else if (type === "give") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
-      if (!isLoc(to) || to === "store") throw new Error("Pick a bar for the give");
+      // `to` is a bar, OR null for a give whose bar you don't remember. Either way the
+      // bottles left the storeroom (store drops, and it's a 'give' so it counts as given
+      // out); an unknown give just isn't credited to a specific bar — a later bar count
+      // absorbs it. A backdated/unknown give can't know a bar's open-bottle composition,
+      // so it drops that bar's breakdown rather than inventing full bottles.
+      // Strict null (not loose !=): a stray undefined from a direct POST shouldn't silently
+      // land as an "unknown bar" give — reject it like any other invalid loc value.
+      if (!(to === null || (isLoc(to) && to !== "store"))) throw new Error("Give to a bar, or leave the bar unknown");
       const rows = await sql`
         with prev as (
           select id, name, cat from items where id = ${itemId} and not archived
@@ -338,8 +408,6 @@ export async function addEntry(
             store = store - ${q},
             patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
             back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-            -- A backdated give can't know the bar's current open-bottle composition, so
-            -- it drops the breakdown to unknown rather than inventing full bottles.
             patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
             back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
           where id = ${itemId} and not archived and store >= ${q} returning id
@@ -349,11 +417,10 @@ export async function addEntry(
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
     } else {
-      // count: the STORE count. A count is an ABSOLUTE level, not a delta, so unlike
-      // give/receive it can't be backdated — writing a past figure onto today's live stock
-      // would corrupt it. So it records NOW (ts defaults to now()) and buckets into the
-      // current business day. Store is whole sealed bottles; the count reconciles it and
-      // logs the drop (from_val -> to_val) that the dashboard reads as consumed.
+      // count: the STORE count. It reconciles the storeroom to the counted figure now and
+      // logs a count move dated to the chosen day, so its drop (from_val -> to_val) buckets
+      // into that shift as consumed. Store is whole sealed bottles. Caller enters the
+      // current physical count; the day just says which shift it closes.
       const v = whole(qty, "Counted amount");
       const rows = await sql`
         with prev as (
@@ -361,8 +428,8 @@ export async function addEntry(
         ), upd as (
           update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
         )
-        insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
-        select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}
+        insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
+        select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
         from prev join upd on upd.id = prev.id returning id`;
       if (!rows.length) throw new Error("That bottle is no longer in the list.");
     }

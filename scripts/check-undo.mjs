@@ -158,6 +158,62 @@ try {
     "the patio breakdown must be cleared — a reversed total says nothing about the split");
   assert.deepEqual(lv.back_levels, [], "and an untouched bar keeps its empty breakdown");
 
+  /* ---- 8. a receive onto a bar reverses from THAT bar, not the storeroom ---- */
+  const r8 = await bottle("R8", 10, 3, 0);
+  await sql`update items set patio = patio + 2 where id = ${r8}`;
+  const barRec = await log(r8, { type: "receive", qty: 2, loc: "patio" });
+  assert.equal(await applyUndo(sql, await move(barRec.id)), null);
+  assert.deepEqual(await at(r8), { store: 10, patio: 3, back: 0 }, "bar receive reverses from the bar");
+
+  /* ---- 9. two undos of one move reverse it once ---- */
+  const d9 = await bottle("D9", 10);
+  await sql`update items set store = store - 4, patio = patio + 4 where id = ${d9}`;
+  const g9 = await log(d9, { type: "give", qty: 4, loc: "patio" });
+  const row9 = await move(g9.id);
+  const both = await Promise.all([applyUndo(sql, row9), applyUndo(sql, row9)]);
+  assert.equal(both.filter((r) => r === null).length, 1, "exactly one undo wins");
+  assert.deepEqual(await at(d9), { store: 10, patio: 0, back: 0 }, "and stock is reversed once");
+
+  /* ---- 10. a count dated to a past day is still undoable while it is last ---- */
+  const b10 = await bottle("B10", 10);
+  await sql`update items set store = 6 where id = ${b10}`;
+  const c10 = await log(b10, { type: "count", loc: "store", from_val: 10, to_val: 6 });
+  await sql`update moves set ts = ts - interval '3 days' where id = ${c10.id}`;
+  assert.equal(await applyUndo(sql, await move(c10.id)), null, "backdated count undoes");
+  assert.deepEqual(await at(b10), { store: 10, patio: 0, back: 0 });
+
+  /* ---- 11. a BACKDATED count still freezes earlier gives (compared by id, not ts) ---- */
+  const back = await bottle("Back", 10);
+  await sql`update items set store = store - 2, patio = patio + 2 where id = ${back}`;
+  const backGive = await log(back, { type: "give", qty: 2, loc: "patio" });
+  // Count overwrites the storeroom AFTER the give (newer id), but is dated 3 days earlier.
+  await sql`update items set store = 5 where id = ${back}`;
+  const backCount = await log(back, { type: "count", loc: "store", from_val: 8, to_val: 5 });
+  await sql`update moves set ts = ts - interval '3 days' where id = ${backCount.id}`;
+  const after11 = await at(back);
+  assert.deepEqual(await applyUndo(sql, await move(backGive.id)), { reason: "counted" },
+    "a count logged after a give (by id) must block that give's undo, even if the count's ts is older");
+  assert.deepEqual(await at(back), after11, "and must leave stock exactly as it was");
+
+  /* ---- 12. a paperwork receive is always undoable, even with a later count on the same bottle ---- */
+  const paper = await bottle("Paper", 10);
+  // Paperwork receive: insert WITHOUT changing stock, affects_stock=false.
+  const [paperRow] = await sql`
+    insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name,
+                       batch, invoice, affects_stock)
+    select 'receive', id, name, cat, 5, 'store', ${userId}, ${userName},
+           ${"B" + TAG + "p"}, ${"INV" + TAG + "p"}, false
+    from items where id = ${paper} returning *`;
+  // Later, a bar count on the same bottle:
+  await sql`update items set patio = 3 where id = ${paper}`;
+  await log(paper, { type: "count", loc: "patio", from_val: 0, to_val: 3 });
+  assert.equal(await applyUndo(sql, paperRow), null,
+    "a paperwork receive moved no stock, so a later count does not depend on it — undo must succeed");
+  const [{ n: paperLeft }] = await sql`select count(*) as n from moves where id = ${paperRow.id}`;
+  assert.equal(Number(paperLeft), 0, "and the paperwork row is deleted");
+  assert.deepEqual(await at(paper), { store: 10, patio: 3, back: 0 },
+    "the storeroom stays untouched (paperwork never raised it)");
+
   console.log(
     "undo ok - an older give reverses exactly with newer gives on top; a count freezes "
     + "what is under it and only reverses while it is the last word; another bottle's "

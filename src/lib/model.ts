@@ -106,6 +106,13 @@ export type Move = {
   /** Set on every line of a delivery, so one drop groups in the activity log. */
   batch: string | null; invoice: string | null; supplier: string | null;
   notes: string | null; to_loc: Loc | null;
+  /**
+   * false only on a paperwork-only delivery (owner added the stock manually first,
+   * then booked the invoice for the record). True for every other move, including
+   * every pre-flag row — stock arithmetic has been default-on for the life of the
+   * database. See schema.sql for the full reasoning.
+   */
+  affects_stock: boolean;
 };
 
 export const WASTAGE_REASONS = [
@@ -118,26 +125,39 @@ export const WASTAGE_REASONS = [
 export type WastageReason = (typeof WASTAGE_REASONS)[number];
 
 /**
- * Which moves undo will actually accept, mirroring undoMove's rule so a link is
+ * Which moves undo will actually accept, mirroring applyUndo's rule so a link is
  * never offered on something that would then be refused.
  *
- * give/receive/waste/transfer are deltas and deltas commute, so one stays undoable
- * until its bottle is counted. A count sets an absolute figure, so it only reverses
- * while nothing else has touched that bottle since.
+ * Both checks are by id — logging order — not by `ts`: the day editor can backdate a
+ * count's `ts` to any business day, and judging "after" by ts there would hide a
+ * backdated count sitting on top of a give. A count undoes only while it is the newest
+ * move on its bottle (max id); a non-count undoes while no count on the same bottle
+ * has a higher id. Paperwork receives (affects_stock = false) moved no stock, so no
+ * count depends on them — they are always undoable.
  *
- * `moves` must be newest-first and must not be filtered by type — a count hidden by
- * a filter still has to freeze the gives underneath it. Any window works as long as
- * it is complete: anything logged after a move in the window is also in the window.
+ * Order of `moves` doesn't matter, but it must not be filtered by type - a count
+ * hidden by a filter still has to freeze the gives underneath it. Any window works as
+ * long as it is complete: anything logged after a move in the window is in it too.
  */
 export function undoableMoveIds(moves: Move[]): Set<number> {
-  const ok = new Set<number>();
-  const countedSince = new Set<number>();
-  const touchedSince = new Set<number>();
+  const maxId = new Map<number, number>();
+  const lastCountId = new Map<number, number>();
   for (const m of moves) {
-    const isCount = m.type === "count";
-    if (isCount ? !touchedSince.has(m.item_id) : !countedSince.has(m.item_id)) ok.add(m.id);
-    if (isCount) countedSince.add(m.item_id);
-    touchedSince.add(m.item_id);
+    if (m.id > (maxId.get(m.item_id) ?? 0)) maxId.set(m.item_id, m.id);
+    if (m.type === "count" && m.id > (lastCountId.get(m.item_id) ?? 0)) {
+      lastCountId.set(m.item_id, m.id);
+    }
+  }
+  const ok = new Set<number>();
+  for (const m of moves) {
+    if (m.type === "count") {
+      if (maxId.get(m.item_id) === m.id) ok.add(m.id);
+    } else if (m.affects_stock === false) {
+      ok.add(m.id); // paperwork receive — no stock to freeze, always undoable
+    } else {
+      const c = lastCountId.get(m.item_id);
+      if (!c || c < m.id) ok.add(m.id);
+    }
   }
   return ok;
 }
@@ -146,6 +166,8 @@ export function undoableMoveIds(moves: Move[]): Set<number> {
 export type Delivery = {
   batch: string; invoice: string; supplier: string | null;
   ts: string; user_name: string; user_id: number | null; bottles: number;
+  /** false when this delivery is paperwork only — all of its receive moves share the flag. */
+  affects_stock: boolean;
   // item_id is what lets a booked delivery be loaded back into the editor.
   lines: { item_id: number; item: string; cat: Cat; qty: number }[];
 };

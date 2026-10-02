@@ -21,6 +21,10 @@ export function Delivery({
   const [q, setQ] = useState("");
   const [invoice, setInvoice] = useState("");
   const [supplier, setSupplier] = useState("");
+  // Paperwork-only: the owner has already added these bottles to stock manually (one by one
+  // through Receive, then counted the bar) and only now records the invoice. True by default
+  // for the common case; a paperwork booking logs the delivery but leaves the storeroom alone.
+  const [paperwork, setPaperwork] = useState(false);
   // Non-null while correcting a booked delivery: same builder, different verb.
   const [editing, setEditing] = useState<Booked | null>(null);
 
@@ -57,6 +61,7 @@ export function Delivery({
     setLines(new Map());
     setInvoice("");
     setSupplier("");
+    setPaperwork(false);
     setEditing(null);
     setQ("");
   }
@@ -67,6 +72,9 @@ export function Delivery({
     setLines(new Map(d.lines.map((l) => [l.item_id, l.qty])));
     setInvoice(d.invoice === "—" ? "" : d.invoice);
     setSupplier(d.supplier ?? "");
+    // The edit preserves the delivery's own paperwork flag — a real delivery stays real,
+    // a paperwork one stays paperwork. The server enforces this; the UI just reflects it.
+    setPaperwork(!d.affects_stock);
     setQ("");
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -80,7 +88,8 @@ export function Delivery({
       run(() => editDelivery(editing.batch, payload, invoice, supplier),
         `Delivery updated — ${noun}`, reset);
     } else {
-      run(() => receiveDelivery(payload, invoice, supplier), `Delivery booked — ${noun}`, reset);
+      run(() => receiveDelivery(payload, invoice, supplier, !paperwork),
+        `Delivery ${paperwork ? "recorded (paperwork only)" : "booked"} — ${noun}`, reset);
     }
   }
 
@@ -94,10 +103,13 @@ export function Delivery({
           <div className="dedit">
             <div className="det">
               <b>Editing invoice {editing.invoice}</b>
+              {!editing.affects_stock && <span className="pbadge">paperwork only</span>}
               <span>
                 booked {new Date(editing.ts).toLocaleDateString("en-US",
                   { day: "numeric", month: "short", year: "numeric" })} by {editing.user_name}
-                {" · "}the storeroom moves by the difference, not the whole amount
+                {editing.affects_stock
+                  ? " · the storeroom moves by the difference, not the whole amount"
+                  : " · stock stays untouched — this delivery only tracks the paperwork"}
               </span>
             </div>
             <button className="decancel" onClick={reset} disabled={pending}>Cancel</button>
@@ -114,6 +126,20 @@ export function Delivery({
             <input value={supplier} onChange={(e) => setSupplier(e.target.value)} autoComplete="off" />
           </div>
         </div>
+
+        <label className={`paper${paperwork ? " on" : ""}`}>
+          <input type="checkbox" checked={paperwork}
+            disabled={!!editing}
+            onChange={(e) => setPaperwork(e.target.checked)} />
+          <span className="pt">
+            <b>Stock already added — paperwork only</b>
+            <span className="ps">
+              Tick this if you&apos;ve already added these bottles manually (one by one in
+              Receive, then counted the bar). Booking will log the invoice without touching
+              the storeroom a second time.
+            </span>
+          </span>
+        </label>
 
         <div className="search" style={{ margin: "14px 0 0" }}>
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -162,8 +188,10 @@ export function Delivery({
                   <div className="dl-nm">
                     <div className="t">{it.name}</div>
                     <div className="s">
-                      {fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store - was + n)}</b>
-                      {was > 0 && n !== was && <span className="dlwas"> was {fmtQty(it.cat, was)}</span>}
+                      {paperwork
+                        ? <>{fmtQty(it.cat, it.store)} in store · <span className="dlwas">no change</span></>
+                        : <>{fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store - was + n)}</b></>}
+                      {!paperwork && was > 0 && n !== was && <span className="dlwas"> was {fmtQty(it.cat, was)}</span>}
                     </div>
                   </div>
                   <div className="dl-qty">
@@ -180,7 +208,8 @@ export function Delivery({
             <div className="dfoot">
               <div className="dsum">
                 <b>{fmt(totalBottles)}</b> bottles · {drafted.length} item{drafted.length === 1 ? "" : "s"}
-                {editing && netChange !== 0 && (
+                {paperwork && <div className="dnet">paperwork only · storeroom unchanged</div>}
+                {!paperwork && editing && netChange !== 0 && (
                   <div className="dnet">
                     storeroom {netChange > 0 ? "+" : "−"}{fmt(Math.abs(netChange))} once saved
                   </div>
@@ -194,7 +223,9 @@ export function Delivery({
               <button className="commit green" disabled={pending || !invoice.trim()} onClick={book}>
                 {pending
                   ? (editing ? "Saving…" : "Booking…")
-                  : (editing ? "Save changes" : "Book delivery")}
+                  : (editing
+                    ? "Save changes"
+                    : paperwork ? "Record delivery" : "Book delivery")}
               </button>
             </div>
           </>
@@ -212,9 +243,12 @@ export function Delivery({
           </div>
         ) : (
           deliveries.map((d) => (
-            <details className={`inv${editing?.batch === d.batch ? " editing" : ""}`} key={d.batch}>
+            <details className={`inv${editing?.batch === d.batch ? " editing" : ""}${!d.affects_stock ? " paper" : ""}`} key={d.batch}>
               <summary>
-                <span className="ino">{d.invoice}</span>
+                <span className="ino">
+                  {d.invoice}
+                  {!d.affects_stock && <span className="pbadge">paperwork</span>}
+                </span>
                 <span className="inmeta">
                   {new Date(d.ts).toLocaleDateString("en-US",
                     { day: "numeric", month: "short", year: "numeric" })}

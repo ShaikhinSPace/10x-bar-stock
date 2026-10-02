@@ -35,8 +35,8 @@ export function applyGiveRun(sql: Sql, r: GiveRun) {
     with lines as (
       select * from unnest(${r.ids}::int[], ${r.qtys}::numeric[]) as t(item_id, qty)
     ), short as (
-      select 1 from lines l join items i on i.id = l.item_id
-      where not i.archived and i.store < l.qty limit 1
+      select 1 from lines l left join items i on i.id = l.item_id and not i.archived
+      where i.id is null or i.store < l.qty limit 1
     ), upd as (
       update items i set
         store = i.store - l.qty,

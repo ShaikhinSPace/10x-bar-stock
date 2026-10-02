@@ -14,9 +14,16 @@ import { attempt, whole, type Result } from "./_shared";
  *
  * Every line lands in a single statement, so a delivery is all-or-nothing: the
  * stock rises and its log entries appear together or neither happens.
+ *
+ * `affectsStock = false` books a paperwork-only delivery: the owner already added the
+ * bottles to the storeroom manually (then counted the bar) and only later gets around
+ * to recording the invoice. Logging the moves still happens — the delivery shows up on
+ * the Delivery tab and in the activity log — but the storeroom isn't touched a second
+ * time, and reports exclude these from the "received" totals so the manual receives
+ * aren't double-counted.
  */
 export async function receiveDelivery(
-  lines: DeliveryLine[], invoice: string, supplier: string
+  lines: DeliveryLine[], invoice: string, supplier: string, affectsStock = true
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
@@ -41,27 +48,41 @@ export async function receiveDelivery(
     const qtys = [...merged.values()];
     const batch = `D${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const sup = supplier.trim() || null;
+    const affects = Boolean(affectsStock);
 
-    // The `guard` CTE makes "not already booked" part of the same statement, so two
-    // people booking the same invoice at once can't both get through. Booking one
-    // invoice twice is the one mistake that silently inflates stock.
-    const rows = await sql`
-      with guard as (
-        select 1 where not exists (select 1 from moves where invoice = ${inv})
-      ), lines as (
-        select * from unnest(${ids}::int[], ${qtys}::numeric[]) as t(item_id, qty)
-      ), upd as (
-        update items i set store = i.store + l.qty
-        from lines l, guard
-        where i.id = l.item_id and not i.archived
-        returning i.id, i.name, i.cat, l.qty
-      )
-      insert into moves
-        (type, item_id, item_name, cat, qty, loc, user_id, user_name, batch, invoice, supplier)
-      select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
-             ${u.id}, ${u.name}, ${batch}, ${inv}, ${sup}
-      from upd
-      returning id`;
+    // Booking one invoice twice is the one mistake that silently inflates stock, and a
+    // single statement alone can't stop two people racing (each sees a snapshot without
+    // the other's rows). So the statement runs in a transaction behind an advisory lock
+    // on the invoice: the second booking waits, then sees the first's rows and is refused.
+    // The `guard` CTE also refuses the whole delivery if any bottle is archived or gone,
+    // so a delivery is never half-booked. The `case when ${affects}` lets paperwork-only
+    // deliveries log without moving stock.
+    const [, rows] = await sql.transaction([
+      sql`select pg_advisory_xact_lock(hashtext(${inv}))`,
+      sql`
+        with guard as (
+          select 1 where not exists (select 1 from moves where invoice = ${inv})
+            and not exists (
+              select 1 from unnest(${ids}::int[]) as t(item_id)
+              left join items i on i.id = t.item_id and not i.archived
+              where i.id is null)
+        ), lines as (
+          select * from unnest(${ids}::int[], ${qtys}::numeric[]) as t(item_id, qty)
+        ), upd as (
+          update items i set
+            store = i.store + case when ${affects}::boolean then l.qty else 0 end
+          from lines l, guard
+          where i.id = l.item_id and not i.archived
+          returning i.id, i.name, i.cat, l.qty
+        )
+        insert into moves
+          (type, item_id, item_name, cat, qty, loc, user_id, user_name,
+           batch, invoice, supplier, affects_stock)
+        select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
+               ${u.id}, ${u.name}, ${batch}, ${inv}, ${sup}, ${affects}
+        from upd
+        returning id`,
+    ]);
 
     if (!rows.length) {
       const [dupe] = await sql`
@@ -71,9 +92,6 @@ export async function receiveDelivery(
           `Invoice ${inv} was already booked on ${new Date(dupe.ts).toLocaleDateString()}.`
         );
       }
-      throw new Error("Some bottles are no longer on the list — reload and try again.");
-    }
-    if (rows.length !== ids.length) {
       throw new Error("Some bottles are no longer on the list — reload and try again.");
     }
     refresh();
@@ -118,12 +136,19 @@ export async function editDelivery(
     if (inv.length > 60) throw new Error("That invoice number is too long");
 
     // Same rule undo uses: your own entries, or anything if you own the place.
+    // Every move in a batch shares the same affects_stock, so bool_and == the flag.
     const [existing] = await sql`
-      select min(user_id) as user_id, count(*) as n from moves where batch = ${batch}`;
+      select min(user_id) as user_id, count(*) as n,
+             bool_and(affects_stock) as affects_stock
+      from moves where batch = ${batch} and type = 'receive'`;
     if (!existing || Number(existing.n) === 0) throw new Error("That delivery is already gone.");
     if (u.role !== "owner" && Number(existing.user_id) !== u.id) {
       throw new Error("You can only edit your own deliveries.");
     }
+    // A paperwork-only delivery stays paperwork-only on edit: changing its qty would
+    // move the storeroom by a delta the stock never saw, so the edit tracks the figure
+    // on paper and leaves the stock alone, exactly as the original booking did.
+    const affects = existing.affects_stock !== false;
 
     const ids = [...merged.keys()];
     const qtys = [...merged.values()];
@@ -132,7 +157,7 @@ export async function editDelivery(
     // Shared with scripts/check-delivery-edit.mjs, which runs this exact statement
     // against a real database — see the module for why it is all-or-nothing.
     const rows = await applyDeliveryEdit(sql, {
-      batch, ids, qtys, invoice: inv, supplier: sup,
+      batch, ids, qtys, invoice: inv, supplier: sup, affectsStock: affects,
     });
 
     if (rows.length !== ids.length) {

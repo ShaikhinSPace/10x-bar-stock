@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { createContext, useContext, useEffect, useRef, useState, useTransition } from "react";
+import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { cap, type SessionUser } from "@/lib/model";
 import { logout, undoMove, type Result } from "../actions";
 
@@ -73,7 +73,14 @@ export function useAction(): Ctx {
 
 /* ============================ shell ============================ */
 
+const noSubscribe = () => () => {};
+
 export function Shell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
+  // Every page buckets moves into bar days and prints times in the viewer's timezone.
+  // The server renders in its own zone (UTC on Vercel), so the page body is held back
+  // until after hydration - otherwise the first client render disagrees with the server
+  // HTML. false on the server and during hydration, true on every render after.
+  const hydrated = useSyncExternalStore(noSubscribe, () => true, () => false);
   const [toast, setToast] = useState<{ msg: string; error?: boolean; moveId?: number } | null>(null);
   const [pending, startTransition] = useTransition();
   const pathname = usePathname();
@@ -88,7 +95,15 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
 
   function run(fn: () => Promise<Result>, okMsg: string, onOk?: () => void) {
     startTransition(async () => {
-      const r = await fn();
+      let r: Result;
+      try {
+        r = await fn();
+      } catch {
+        // Network drop / server crash: the action never returned, so say so rather than
+        // leaving the user to guess whether it saved.
+        setToast({ msg: "Couldn't reach the server — check the connection and try again", error: true });
+        return;
+      }
       if (r.ok) {
         onOk?.();
         setToast({ msg: okMsg, moveId: r.moveId });
@@ -151,7 +166,7 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
               <button onClick={() => logout()}>Sign out</button>
             </div>
 
-            {children}
+            {hydrated ? children : <div className="empty">Loading…</div>}
           </main>
         </div>
       </div>

@@ -54,7 +54,9 @@ function delta(cur: number, prev: number, unit?: (n: number) => string): string 
 async function movementTotals(w: Window) {
   const [r] = await sql`
     select
-      coalesce(sum(case when m.type = 'receive' then m.qty else 0 end), 0)  as received,
+      -- Paperwork-only receives recorded a delivery the owner had already added by hand,
+      -- so counting them here would double the real intake against the manual receives.
+      coalesce(sum(case when m.type = 'receive' and m.affects_stock then m.qty else 0 end), 0)  as received,
       coalesce(sum(case when m.type = 'give'    then m.qty else 0 end), 0)  as issued,
       coalesce(sum(case when m.type = 'waste'   then m.qty else 0 end), 0)  as wasted,
       coalesce(sum(case when m.type = 'transfer' then m.qty else 0 end), 0) as transferred,
@@ -63,7 +65,8 @@ async function movementTotals(w: Window) {
       coalesce(sum(case when m.type = 'count' and coalesce(m.to_val,0) > coalesce(m.from_val,0)
                         then coalesce(m.to_val,0) - coalesce(m.from_val,0) else 0 end), 0) as count_up,
       count(*) filter (where m.type = 'count')                              as counts_done,
-      count(distinct m.batch) filter (where m.batch is not null)            as deliveries
+      -- A paperwork-only delivery is still a delivery that happened, so it belongs in the count.
+      count(distinct m.batch) filter (where m.batch is not null and m.type = 'receive') as deliveries
     from moves m
     join items i on i.id = m.item_id and not i.archived
     where m.ts >= ${w.from.toISOString()} and m.ts < ${w.to.toISOString()}`;
@@ -84,8 +87,11 @@ async function onHandAt(t: Date): Promise<number> {
     select coalesce(sum(store + patio + back), 0) as total from items where not archived`;
   const [since] = await sql`
     select coalesce(sum(case m.type
-      when 'receive' then m.qty
+      -- Paperwork-only receives never moved stock, so unwinding one must not credit it back.
+      when 'receive' then case when m.affects_stock then m.qty else 0 end
       when 'waste'   then -m.qty
+      -- an unknown-bar give left the storeroom but no bar was credited, so it shrinks the total
+      when 'give'    then case when m.loc is null then -m.qty else 0 end
       when 'count'   then coalesce(m.to_val, 0) - coalesce(m.from_val, 0)
       else 0 end), 0) as d
     from moves m join items i on i.id = m.item_id and not i.archived
@@ -114,8 +120,8 @@ async function categorySection(cur: Window, prev: Window): Promise<PdfSection> {
   const rows = await sql`
     with agg as (
       select i.cat,
-        sum(case when m.ts >= ${cur.from.toISOString()} and m.type = 'receive' then m.qty else 0 end) as recv_c,
-        sum(case when m.ts <  ${cur.from.toISOString()} and m.type = 'receive' then m.qty else 0 end) as recv_p,
+        sum(case when m.ts >= ${cur.from.toISOString()} and m.type = 'receive' and m.affects_stock then m.qty else 0 end) as recv_c,
+        sum(case when m.ts <  ${cur.from.toISOString()} and m.type = 'receive' and m.affects_stock then m.qty else 0 end) as recv_p,
         sum(case when m.ts >= ${cur.from.toISOString()} and m.type = 'give'    then m.qty else 0 end) as iss_c,
         sum(case when m.ts <  ${cur.from.toISOString()} and m.type = 'give'    then m.qty else 0 end) as iss_p,
         sum(case when m.ts >= ${cur.from.toISOString()} and m.type = 'waste'   then m.qty else 0 end) as wst_c,
