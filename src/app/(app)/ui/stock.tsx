@@ -77,9 +77,10 @@ export function Stock({
         ))}
       </div>
 
-      {/* The barback's surface. The owner works bottle-by-bottle through the sheet,
-          so this stays off their Stock page rather than being a button everyone sees. */}
-      {user.role !== "owner" && (
+      {/* Bulk give-run from the store to a bar — anyone restocking a bar at open
+          benefits, so it's visible to owners and staff alike. Hidden on the bar
+          views because the flow is store → bar and the destination is the bar. */}
+      {loc === "store" && (
         <Link className="stk-start run" href="/stock/run">
           <span className="si">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

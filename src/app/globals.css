@@ -500,6 +500,39 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .at-side { display: flex; flex-direction: column; gap: 14px; }
 
 /* ── KPI tiles: one flat row, equal weight - no oversized hero metric ── */
+/* Today strip — the shift's own figures, above the rolling-7d tiles. */
+.today {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 14px 16px;
+  margin-bottom: 12px;
+}
+.today-head {
+  font-size: 11px; color: var(--txt-3); font-weight: 600;
+  letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 10px;
+}
+.today-row {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line);
+}
+.t-item .tv {
+  font-family: var(--disp); font-size: 22px; font-weight: 700;
+  color: var(--txt); font-variant-numeric: tabular-nums; line-height: 1.1;
+}
+.t-item .tk { font-size: 11.5px; color: var(--txt-3); margin-top: 4px; font-weight: 500; }
+.t-item.warn .tv { color: var(--amber); }
+.today-counts {
+  margin-top: 10px; font-size: 13px; color: var(--txt-2);
+  font-variant-numeric: tabular-nums;
+}
+.today-counts b { color: var(--txt); font-weight: 600; margin-right: 4px; }
+.today-counts .sep { color: var(--txt-3); }
+@media (max-width: 560px) {
+  .today-row { grid-template-columns: repeat(2, 1fr); }
+  .today-counts { font-size: 12px; }
+}
+
 .tiles { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 .tile {
   display: block; width: 100%; text-align: left;

@@ -35,11 +35,60 @@ export function Dashboard({
     .filter((m) => m.type === "count" && m.loc !== "store" && +new Date(m.ts) >= since)
     .reduce((a, m) => a + Math.max(0, (m.from_val ?? 0) - (m.to_val ?? 0)), 0);
 
+  // "Today" strip — actionable facts for the current business day. Rolling 7d
+  // tells you what's normal, "today" tells you what's happened this shift.
+  const todayKey = bizDayKey(now);
+  const todayMoves = moves.filter((m) => bizDayKey(+new Date(m.ts)) === todayKey);
+  const giveToday = todayMoves
+    .filter((m) => m.type === "give")
+    .reduce((a, m) => a + (m.qty ?? 0), 0);
+  const deliveriesToday = new Set(
+    todayMoves.filter((m) => m.type === "receive" && m.batch).map((m) => m.batch)
+  ).size;
+  const pouredToday = todayMoves
+    .filter((m) => m.type === "count" && m.loc !== "store")
+    .reduce((a, m) => a + Math.max(0, (m.from_val ?? 0) - (m.to_val ?? 0)), 0);
+  const wasteToday = todayMoves
+    .filter((m) => m.type === "waste")
+    .reduce((a, m) => a + (m.qty ?? 0), 0);
+  const lastCountTs = (loc: Loc) => {
+    let ts = 0;
+    for (const m of moves) if (m.type === "count" && m.loc === loc) {
+      const t = +new Date(m.ts);
+      if (t > ts) ts = t;
+    }
+    return ts;
+  };
+  const countLabel = (loc: Loc) => {
+    const ts = lastCountTs(loc);
+    if (!ts) return "never";
+    if (bizDayKey(ts) !== todayKey) return "not today";
+    const mins = Math.max(1, Math.round((now - ts) / 60_000));
+    return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
+  };
+
   return (
     <>
       <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
 
       <div className="dash">
+        <div className="today">
+          <div className="today-head">Today</div>
+          <div className="today-row">
+            <div className="t-item"><div className="tv">{fmt(giveToday)}</div><div className="tk">Given out</div></div>
+            <div className="t-item"><div className="tv">{deliveriesToday}</div><div className="tk">Deliveries</div></div>
+            <div className="t-item"><div className="tv">{fmt(pouredToday)}</div><div className="tk">Poured</div></div>
+            <div className={`t-item${wasteToday > 0 ? " warn" : ""}`}><div className="tv">{fmt(wasteToday)}</div><div className="tk">Wasted</div></div>
+          </div>
+          <div className="today-counts">
+            Last count — <b>Patio</b> {countLabel("patio")}
+            <span className="sep"> · </span>
+            <b>Back</b> {countLabel("back")}
+            <span className="sep"> · </span>
+            <b>Store</b> {countLabel("store")}
+          </div>
+        </div>
+
         <div className="tiles">
           <div className="tile">
             <div className="v">{fmt(grandTot)}</div><div className="k">Total bottles</div>
