@@ -7,11 +7,10 @@ export const homeFor = (user: SessionUser) =>
   user.role === "owner" ? "/dashboard" : "/stock/run";
 
 /**
- * Guard for every page except /stock/run.
+ * Guard for owner-only pages (dashboard, delivery, activity, manage).
  *
- * The barback's whole app is the run screen — no dashboard, no stock list, no
- * deliveries, no activity, no manage. Anything else bounces them straight back,
- * so a typed URL or a stale bookmark cannot land them somewhere they should not be.
+ * Staff hit these only by typing a URL or following a stale bookmark; they
+ * bounce back to /stock/run.
  *
  * Layout and page render in parallel, so this has to live on the page itself; the
  * layout's own session check does not stop a page body from running.
@@ -20,5 +19,12 @@ export async function ownerPage(): Promise<SessionUser> {
   const user = await getSession();
   if (!user) redirect("/login");
   if (user.role !== "owner") redirect("/stock/run");
+  return user;
+}
+
+/** Guard for pages open to both roles (Stock sheet). Signed in = allowed. */
+export async function signedInPage(): Promise<SessionUser> {
+  const user = await getSession();
+  if (!user) redirect("/login");
   return user;
 }

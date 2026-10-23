@@ -2,17 +2,18 @@
 
 import { refresh } from "next/cache";
 import { sql, type Loc } from "@/lib/db";
-import { requireUser } from "@/lib/auth";
+import { requireOwner } from "@/lib/auth";
 import { attempt, partial, isLoc, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
 
 /**
- * Submit a whole stocktake for one location in a single statement.
+ * Submit a whole count for one location in a single statement.
  *
- * Counting a bar bottle-by-bottle through the item sheet is six interactions per
- * bottle across ~45 bottles, which is how stocktakes end up not happening. Here the
- * counter walks the list once and submits.
+ * There is no separate "stocktake" — the manager counts open and close, the
+ * system takes the difference. Counting bottle-by-bottle through the item sheet
+ * is six interactions per bottle across ~45 bottles, which is how counts end up
+ * not happening. Here the counter walks the list once and submits.
  *
  * Only rows whose count actually moved are written: a no-change row updates nothing
  * and logs nothing, so a `count` entry in the log always means something shifted.
@@ -23,13 +24,10 @@ export async function submitStocktake(
   loc: Loc, lines: { itemId: number; value: number }[]
 ): Promise<Result> {
   return attempt(async () => {
-    const u = await requireUser();
+    const u = await requireOwner();
     if (!isLoc(loc)) throw new Error("Unknown location");
-    // The storeroom isn't counted — its total is fixed by deliveries and gives, so a
-    // physical recount can only introduce drift. Corrections go through the move ledger.
-    if (loc === "store") throw new Error("The storeroom isn't counted — correct it through deliveries and gives.");
     if (!Array.isArray(lines) || !lines.length) throw new Error("Nothing counted yet");
-    if (lines.length > 1000) throw new Error("That's too many lines for one stocktake");
+    if (lines.length > 1000) throw new Error("That's too many lines for one count");
 
     const seen = new Map<number, number>();
     for (const l of lines) {

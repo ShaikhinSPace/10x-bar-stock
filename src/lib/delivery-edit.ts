@@ -9,9 +9,13 @@ type Sql = (strings: TemplateStringsArray, ...vals: unknown[]) => Promise<Record
 
 export type DeliveryEdit = {
   batch: string;
-  /** Item ids, deduped, aligned with `qtys`. */
+  /** Item ids, deduped, aligned with `qtys` and `costs`. */
   ids: number[];
   qtys: number[];
+  /** Per-line cost, aligned with ids. Omit for an all-null costs run (clears every cost). */
+  costs?: (number | null)[];
+  /** Per-line case size (bottles per case), aligned with ids. Omit to clear every line's case size. */
+  caseSizes?: (number | null)[];
   invoice: string;
   supplier: string | null;
   /** The delivery's own affects_stock, read from its existing moves — paperwork stays paperwork. */
@@ -41,9 +45,12 @@ export type DeliveryEdit = {
  * nothing was written.
  */
 export function applyDeliveryEdit(sql: Sql, e: DeliveryEdit) {
+  const costs = e.costs ?? e.ids.map(() => null);
+  const caseSizes = e.caseSizes ?? e.ids.map(() => null);
   return sql`
     with fresh as (
-      select * from unnest(${e.ids}::int[], ${e.qtys}::numeric[]) as t(item_id, qty)
+      select * from unnest(${e.ids}::int[], ${e.qtys}::numeric[], ${costs}::numeric[], ${caseSizes}::int[])
+        as t(item_id, qty, cost, case_size)
     ), old as (
       select item_id, sum(qty) as qty from moves where batch = ${e.batch} and type = 'receive' group by item_id
     ), delta as (
@@ -77,10 +84,10 @@ export function applyDeliveryEdit(sql: Sql, e: DeliveryEdit) {
     )
     insert into moves
       (type, item_id, item_name, cat, qty, loc, user_id, user_name,
-       batch, invoice, supplier, ts, affects_stock)
+       batch, invoice, supplier, ts, affects_stock, cost, line_case_size)
     select 'receive', i.id, i.name, i.cat, f.qty, 'store',
            orig.user_id, orig.user_name, ${e.batch}, ${e.invoice}, ${e.supplier}, orig.ts,
-           ${e.affectsStock}
+           ${e.affectsStock}, f.cost, f.case_size
     from fresh f
     join items i on i.id = f.item_id
     cross join orig

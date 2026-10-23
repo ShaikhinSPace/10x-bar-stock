@@ -1061,53 +1061,6 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 @media (hover: hover) and (pointer: fine) { .commit.red:hover { box-shadow: 0 4px 20px var(--red-glow); } }
 .commit:disabled { opacity: 0.35; transform: none !important; box-shadow: none !important; }
 
-/* ── scanner ── */
-.scan-btn {
-  background: var(--surface-2);
-  border: 1px solid var(--line);
-  border-radius: var(--r-sm);
-  padding: 8px 14px;
-  color: var(--txt-2);
-  font-weight: 600;
-  font-size: 13px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  transition: all 0.15s ease;
-}
-@media (hover: hover) and (pointer: fine) { .scan-btn:hover { border-color: var(--blue); color: var(--txt); background: var(--surface-3); } }
-.scan-modal {
-  position: fixed; inset: 0; z-index: 70;
-  background: rgba(0, 0, 0, 0.85);
-  backdrop-filter: blur(12px);
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  padding: 20px;
-}
-.scan-box {
-  background: var(--surface);
-  border: 1px solid var(--line-2);
-  border-radius: var(--r-lg);
-  padding: 28px;
-  max-width: 420px; width: 100%;
-  text-align: center;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
-}
-.scan-viewport {
-  width: 100%; aspect-ratio: 4/3;
-  background: #050810; border-radius: var(--r-sm);
-  overflow: hidden; position: relative; margin: 18px 0;
-  border: 2px solid var(--blue);
-  box-shadow: 0 0 20px var(--blue-glow);
-}
-.scan-line {
-  position: absolute; left: 0; right: 0; height: 2px;
-  background: var(--red);
-  box-shadow: 0 0 12px var(--red);
-  animation: scan 2s infinite ease-in-out;
-}
-@keyframes scan { 0% { top: 10%; } 50% { top: 90%; } 100% { top: 10%; } }
-
 /* ── toast ── */
 .toast {
   position: fixed; left: 50%; bottom: 120px;

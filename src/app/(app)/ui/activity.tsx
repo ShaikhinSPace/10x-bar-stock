@@ -19,6 +19,8 @@ export function Activity({
 
   const filtered = useMemo(() => {
     if (filter === "ALL") return moves;
+    if (filter === "EMPTIED") return moves.filter((m) =>
+      m.type === "count" && m.loc !== "store" && (m.to_val ?? 0) === 0);
     return moves.filter((m) => m.type.toUpperCase() === filter);
   }, [moves, filter]);
 
@@ -39,7 +41,10 @@ export function Activity({
       else if (m.type === "receive") rows.push([...base, m.batch ? (m.affects_stock ? "DELIVERY" : "DELIVERY (PAPERWORK)") : "RECEIVE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc ?? "store"], m.user_name, ...extra]);
       else if (m.type === "waste") rows.push([...base, "WASTAGE", m.item_name, m.cat, m.qty ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
       else if (m.type === "transfer") rows.push([...base, "TRANSFER", m.item_name, m.cat, m.qty ?? 0, `${LOC_LABEL[m.loc!]} -> ${LOC_LABEL[m.to_loc!]}`, m.user_name, ...extra]);
-      else rows.push([...base, "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
+      else {
+        const emptied = m.loc !== "store" && (m.to_val ?? 0) === 0;
+        rows.push([...base, emptied ? "EMPTIED" : "COUNT SET", m.item_name, m.cat, m.to_val ?? 0, LOC_LABEL[m.loc!], m.user_name, ...extra]);
+      }
     }
     const csv = rows
       .map((r) => r.map((c) => (/[",\n]/.test(String(c)) ? `"${String(c).replace(/"/g, '""')}"` : c)).join(","))
@@ -76,7 +81,7 @@ export function Activity({
       )}
 
       <div className="chips" style={{ marginBottom: 14 }}>
-        {["ALL", "GIVE", "RECEIVE", "TRANSFER", "WASTE", "COUNT"].map((f) => (
+        {["ALL", "GIVE", "RECEIVE", "TRANSFER", "WASTE", "COUNT", "EMPTIED"].map((f) => (
           <button key={f} className={`chip${filter === f ? " on" : ""}`} onClick={() => setFilter(f)}>
             {f === "ALL" ? "All moves" : cap(f)}
           </button>
@@ -92,15 +97,21 @@ export function Activity({
           const head = dk !== currentDay ? ((currentDay = dk), dk) : null;
           const canUndo = undoable.has(m.id) && (user.role === "owner" || m.user_name === user.name);
 
+          // A bar count that lands on 0 means the bottle was poured empty — flag it so
+          // it stands out from a routine count. Store counts stay plain.
+          const emptied = m.type === "count" && m.loc !== "store" && (m.to_val ?? 0) === 0;
+
           const icon = m.type === "give" ? "↗"
             : m.type === "receive" ? "↓"
             : m.type === "waste" ? "⚠"
             : m.type === "transfer" ? "⇄"
+            : emptied ? "∅"
             : "✎";
 
           const tagClass = m.type === "receive" && m.batch ? "batch"
             : m.type === "waste" ? "waste"
             : m.type === "transfer" ? "transfer"
+            : emptied ? "waste"
             : m.loc ?? "store";
 
           const tagLabel = m.type === "receive"
@@ -110,6 +121,7 @@ export function Activity({
             : m.type === "waste" ? `Wasted (${LOC_SHORT[m.loc!]})`
             : m.type === "transfer" ? `${LOC_SHORT[m.loc!]} → ${LOC_SHORT[m.to_loc!]}`
             : m.type === "give" && !m.loc ? "Unknown"
+            : emptied ? `Emptied (${LOC_SHORT[m.loc!]})`
             : `${LOC_SHORT[m.loc!]}${m.type === "count" ? " count" : ""}`;
 
           return (

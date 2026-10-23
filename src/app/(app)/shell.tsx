@@ -115,11 +115,11 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
 
   const say = (msg: string, error?: boolean) => setToast({ msg, error });
 
-  // A barback's whole app is /stock/run, so there is nowhere for them to navigate:
-  // no tabs, and the bars that would hold them are dropped rather than left empty.
+  // Staff get the Stock tab only — Give / Receive / Transfer on bottles, nothing more.
+  // Owners see every tab.
   const tabs: Tab[] = user.role === "owner"
     ? ["dashboard", "stock", "delivery", "activity", "manage"]
-    : [];
+    : ["stock"];
 
   // Link handles the URL, the back button and scroll-to-top; the shell only
   // has to say which one is current.

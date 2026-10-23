@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CAT_MAX, cap, fmt, fmtQty, normCat, type Cat, type Category, type Item, type SessionUser, type Staff } from "@/lib/model";
-import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, setReorderIgnore, setReorderLevel, setUserActive, type Result } from "../../actions";
+import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, setCaseSize, setReorderIgnore, setReorderLevel, setUserActive, type Result } from "../../actions";
 import { useAction } from "../shell";
 import { SortDir, catColor, rankIn, sortRows, useColumnSort, useEscapeClose, usePopoverClose } from "./shared";
 
@@ -22,6 +22,7 @@ export function Manage({
   const cat = cats.some((c) => c.name === picked) ? picked : (cats[0]?.name ?? "");
   const [store, setStore] = useState("0");
   const [rl, setRl] = useState("2");
+  const [caseStr, setCaseStr] = useState("1");
   const [mq, setMq] = useState("");
 
   const [uName, setUName] = useState("");
@@ -63,7 +64,8 @@ export function Manage({
         <form className="frm" onSubmit={(e) => {
           e.preventDefault();
           if (pending) return;
-          run(() => addItem(name, cat, Number(store), Number(rl)), `Added ${name.trim()}`);
+          run(() => addItem(name, cat, Number(store), Number(rl), Math.max(1, Number(caseStr) || 1)),
+            `Added ${name.trim()}`);
         }}>
           <div className="fld">
             <label>Name</label>
@@ -73,7 +75,12 @@ export function Manage({
           <div className="frow">
             <div className="fld">
               <label>Category</label>
-              <select value={cat} onChange={(e) => setCat(e.target.value as Cat)}>
+              <select value={cat} onChange={(e) => {
+                const nextCat = e.target.value as Cat;
+                setCat(nextCat);
+                // Default case size follows the category: beer = 24, else 1. Owner can still override.
+                setCaseStr(nextCat === "BEER" ? "24" : "1");
+              }}>
                 {cats.map((c) => <option key={c.name} value={c.name}>{cap(c.name)}</option>)}
               </select>
             </div>
@@ -86,6 +93,11 @@ export function Manage({
               <label>Reorder at</label>
               <input type="number" inputMode="numeric" min="0" value={rl}
                 onChange={(e) => setRl(e.target.value)} />
+            </div>
+            <div className="fld">
+              <label>Bottles / case</label>
+              <input type="number" inputMode="numeric" min="1" value={caseStr}
+                onChange={(e) => setCaseStr(e.target.value)} />
             </div>
           </div>
           <button className="btn" type="submit" disabled={pending}>
@@ -247,9 +259,10 @@ function BottleRow({ i, cats, run }: {
   const [eName, setEName] = useState(i.name);
   const [eCat, setECat] = useState<Cat>(i.cat);
   const [eTags, setETags] = useState<Cat[]>(i.tags);
+  const [eCase, setECase] = useState<string>(String(i.case_size));
 
   function openEdit() {
-    setEName(i.name); setECat(i.cat); setETags(i.tags); setEditing(true);
+    setEName(i.name); setECat(i.cat); setETags(i.tags); setECase(String(i.case_size)); setEditing(true);
   }
 
   // The bottle's name and categories are edited here, in Manage, rather than on the
@@ -285,18 +298,31 @@ function BottleRow({ i, cats, run }: {
               })}
             </div>
           </div>
+          <div className="fld">
+            <label>Bottles per case</label>
+            <input type="number" inputMode="numeric" min="1" value={eCase}
+              onChange={(e) => setECase(e.target.value)} aria-label="Bottles per case" />
+          </div>
           <div className="hint">
-            The main category is what totals, colours and the beer cases rule use.
-            Extra ones only make it findable there too — nothing is counted twice.
+            Main category drives totals and colour. Case size says how many bottles make a case —
+            1 for loose bottles, 24 for standard beer. Shows as cases on the Stock screen.
           </div>
           <div className="medit-foot">
             <button className="btn ghost" onClick={() => setEditing(false)}>Cancel</button>
             <button className="btn" disabled={pending || !eName.trim()}
-              onClick={() => run(
-                () => editItem(i.id, eName, eCat, eTags.filter((t) => t !== eCat)),
-                `Saved ${eName.trim()}`,
-                () => setEditing(false),
-              )}>
+              onClick={async () => {
+                const nextCase = Math.max(1, Math.floor(Number(eCase) || 1));
+                run(
+                  async () => {
+                    const a = await editItem(i.id, eName, eCat, eTags.filter((t) => t !== eCat));
+                    if (!a.ok) return a;
+                    if (nextCase !== i.case_size) return setCaseSize(i.id, nextCase);
+                    return a;
+                  },
+                  `Saved ${eName.trim()}`,
+                  () => setEditing(false),
+                );
+              }}>
               {pending ? "Saving…" : "Save changes"}
             </button>
           </div>
@@ -312,7 +338,8 @@ function BottleRow({ i, cats, run }: {
         <div className="s">
           {cap(i.cat)}
           {i.tags.length > 0 && ` + ${i.tags.map(cap).join(", ")}`}
-          {" · "}store {fmtQty(i.cat, i.store)} · patio {fmtQty(i.cat, i.patio)} · back {fmtQty(i.cat, i.back)}
+          {" · "}store {fmtQty(i.cat, i.store, i.case_size)} · patio {fmtQty(i.cat, i.patio, i.case_size)} · back {fmtQty(i.cat, i.back, i.case_size)}
+          {i.case_size > 1 && ` · case of ${i.case_size}`}
           {i.ignore_reorder && " · reorder alerts off"}
         </div>
       </div>
@@ -326,7 +353,7 @@ function BottleRow({ i, cats, run }: {
               e.target.value = fmt(i.rl);
               return;
             }
-            if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v)}`);
+            if (v !== i.rl) run(() => setReorderLevel(i.id, v), `${i.name} reorders at ${fmtQty(i.cat, v, i.case_size)}`);
           }} />
       </div>
       <button className={`rignore${i.ignore_reorder ? " on" : ""}`}

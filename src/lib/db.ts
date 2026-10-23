@@ -28,7 +28,7 @@ const nums = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter(Number.isF
 export async function getItems(): Promise<Item[]> {
   const rows = await sql`
     select i.id, i.name, i.cat, i.store, i.patio, i.back, i.rl, i.ignore_reorder,
-           i.patio_levels, i.back_levels,
+           i.patio_levels, i.back_levels, i.case_size,
            coalesce(array_agg(t.cat order by t.cat) filter (where t.cat is not null), '{}') as tags
     from items i left join item_tags t on t.item_id = i.id
     where not i.archived
@@ -39,6 +39,7 @@ export async function getItems(): Promise<Item[]> {
     store: num(r.store)!, patio: num(r.patio)!, back: num(r.back)!, rl: num(r.rl)!,
     ignore_reorder: r.ignore_reorder,
     patio_levels: nums(r.patio_levels), back_levels: nums(r.back_levels),
+    case_size: Number(r.case_size ?? 1),
     tags: Array.isArray(r.tags) ? r.tags : [],
   }));
 }
@@ -126,10 +127,15 @@ export async function getDeliveries(limit = 100): Promise<Delivery[]> {
     select batch, invoice, supplier,
            min(ts) as ts, min(user_name) as user_name, min(user_id) as user_id,
            sum(qty) as bottles,
+           -- cost is a UNIT price (per bottle) stored on each line. The delivery total
+           -- is the per-bottle cost multiplied by that line's qty, summed. sum() returns
+           -- null when every line's cost is null — exactly "no cost entered".
+           sum(qty * cost) as cost,
            -- A delivery's lines all share one affects_stock, so bool_and == bool_or == the flag.
            bool_and(affects_stock) as affects_stock,
            json_agg(json_build_object(
-                      'item_id', item_id, 'item', item_name, 'cat', cat, 'qty', qty)
+                      'item_id', item_id, 'item', item_name, 'cat', cat,
+                      'qty', qty, 'cost', cost, 'case_size', line_case_size)
                     order by item_name) as lines
     from moves
     where batch is not null and type = 'receive'
@@ -141,8 +147,13 @@ export async function getDeliveries(limit = 100): Promise<Delivery[]> {
     ts: new Date(r.ts).toISOString(), user_name: r.user_name,
     user_id: r.user_id === null ? null : Number(r.user_id),
     bottles: Number(r.bottles),
+    cost: r.cost === null || r.cost === undefined ? null : Number(r.cost),
     affects_stock: r.affects_stock !== false,
-    lines: (r.lines as { item_id: number; item: string; cat: Item["cat"]; qty: string }[])
-      .map((l) => ({ item_id: Number(l.item_id), item: l.item, cat: l.cat, qty: Number(l.qty) })),
+    lines: (r.lines as { item_id: number; item: string; cat: Item["cat"]; qty: string; cost: string | null; case_size: number | null }[])
+      .map((l) => ({
+        item_id: Number(l.item_id), item: l.item, cat: l.cat, qty: Number(l.qty),
+        cost: l.cost === null || l.cost === undefined ? null : Number(l.cost),
+        case_size: l.case_size === null || l.case_size === undefined ? null : Number(l.case_size),
+      })),
   }));
 }

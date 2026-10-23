@@ -62,6 +62,13 @@ alter table items add column if not exists ignore_reorder boolean not null defau
 alter table items add column if not exists patio_levels numeric(10,2)[] not null default '{}';
 alter table items add column if not exists back_levels  numeric(10,2)[] not null default '{}';
 
+-- How many bottles make up a case for this bottle. Default 1 (no case concept).
+-- Beer is seeded to 24 on first run; the owner can change any item's case_size from Manage.
+-- Anything with case_size > 1 is "counted by cases" on the store screen and formatted that
+-- way, so the owner never has to think in loose bottles for things that live in cases.
+alter table items add column if not exists case_size int not null default 1 check (case_size >= 1);
+update items set case_size = 24 where cat = 'BEER' and case_size = 1;
+
 -- Existing databases created items with the old inline CHECK before
 -- categories existed - drop it and swap in the real foreign key. Named and
 -- dropped explicitly (like moves_type_check below) so this stays safe to
@@ -113,6 +120,16 @@ alter table moves add column if not exists invoice  text;
 alter table moves add column if not exists supplier text;
 alter table moves add column if not exists notes    text; -- waste reasons, comments
 alter table moves add column if not exists to_loc   text; -- transfer destination
+
+-- Delivery cost — per-line UNIT price (per bottle). Delivery total = sum(qty * cost)
+-- grouped by batch. Nullable because the owner may book a delivery before the
+-- invoice amount is to hand.
+alter table moves add column if not exists cost     numeric(12,2);
+
+-- Per-line case size for a delivery row — "this line was received as N cases of M
+-- bottles". Beer cases vary (24-pack today, 30-pack tomorrow), so this is captured
+-- per line rather than looked up from items.case_size. Null = plain bottles.
+alter table moves add column if not exists line_case_size int;
 
 -- Paperwork-only deliveries: the owner already received the drop manually (bottle-by-bottle
 -- through Receive) and counted the bar, and only later books the delivery for the invoice

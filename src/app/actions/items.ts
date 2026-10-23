@@ -8,19 +8,30 @@ import { attempt, whole, partial, knownCats, type Result } from "./_shared";
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
 
 export async function addItem(
-  name: string, cat: Cat, store: number, rl: number
+  name: string, cat: Cat, store: number, rl: number, caseSize = 1
 ): Promise<Result> {
   return attempt(async () => {
     await requireOwner();
     const n = name.trim();
     if (!n) throw new Error("Give the bottle a name");
     if (!(await knownCats()).has(String(cat))) throw new Error("Pick a category");
+    const cs = Math.max(1, Math.floor(Number(caseSize) || 1));
 
     const rows = await sql`
-      insert into items (name, cat, store, rl)
-      values (${n}, ${cat}, ${whole(store, "Opening stock")}, ${partial(rl, "Reorder level")})
+      insert into items (name, cat, store, rl, case_size)
+      values (${n}, ${cat}, ${whole(store, "Opening stock")}, ${partial(rl, "Reorder level")}, ${cs})
       on conflict (name) do nothing returning id`;
     if (!rows.length) throw new Error(`"${n}" is already on the list.`);
+    refresh();
+  });
+}
+
+/** How many bottles make up one case for this bottle. 1 = plain bottles. */
+export async function setCaseSize(itemId: number, caseSize: number): Promise<Result> {
+  return attempt(async () => {
+    await requireOwner();
+    const cs = Math.max(1, Math.floor(Number(caseSize) || 1));
+    await sql`update items set case_size = ${cs} where id = ${itemId}`;
     refresh();
   });
 }

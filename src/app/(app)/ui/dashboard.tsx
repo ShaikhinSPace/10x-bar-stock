@@ -57,7 +57,7 @@ export function Dashboard({
           <button className={`tile${reorder.length ? " warnstate" : ""}`}
             onClick={() => document.getElementById("reorder-table")
               ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
-            <div className="v">{reorder.length}</div><div className="k">Need reorder</div>
+            <div className="v">{reorder.length}</div><div className="k">Reorder</div>
           </button>
           <div className="tile">
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
@@ -176,9 +176,9 @@ function ReorderTable({
                       <div className="nm">{i.name}</div>
                       <div className="cat">{cap(i.cat)}</div>
                     </td>
-                    <td className="num short">{fmtQty(i.cat, i.store)}</td>
-                    <td className="num hide-sm">{fmtQty(i.cat, i.patio + i.back)}</td>
-                    <td className="num">{fmtQty(i.cat, i.rl)}</td>
+                    <td className="num short">{fmtQty(i.cat, i.store, i.case_size)}</td>
+                    <td className="num hide-sm">{fmtQty(i.cat, i.patio + i.back, i.case_size)}</td>
+                    <td className="num">{fmtQty(i.cat, i.rl, i.case_size)}</td>
                     {canIgnore && (
                       <td className="num">
                         <button className="rignore" disabled={pending}

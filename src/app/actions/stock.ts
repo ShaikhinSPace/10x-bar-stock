@@ -164,7 +164,7 @@ export async function countBarBottles(
   itemId: number, loc: Loc, levels: number[]
 ): Promise<Result> {
   return attempt(async () => {
-    const u = await requireUser();
+    const u = await requireOwner();
     if (loc !== "patio" && loc !== "back") throw new Error("Only the bars are counted bottle by bottle");
     if (!Array.isArray(levels)) throw new Error("Enter at least one bottle");
     if (levels.length > 60) throw new Error("That's more open bottles than a bar can hold");
@@ -223,12 +223,12 @@ export async function countStore(itemId: number, value: number): Promise<Result>
   });
 }
 
-/** Log a wasted, broken, or spilled bottle. */
+/** Log a wasted, broken, or spilled bottle. Owner-only. */
 export async function logWaste(
   itemId: number, qty: number, loc: Loc, reason: string
 ): Promise<Result> {
   return attempt(async () => {
-    const u = await requireUser();
+    const u = await requireOwner();
     if (!isLoc(loc)) throw new Error("Unknown location");
     const q = loc === "store" ? whole(qty, "Waste quantity") : partial(qty, "Waste quantity");
     if (q <= 0) throw new Error("Quantity must be greater than zero");

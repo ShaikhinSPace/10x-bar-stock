@@ -192,10 +192,20 @@ function Sheet({
   // whatever" that masks real leakage. Bar counts stay staff-accessible.
   const [countLoc, setCountLoc] = useState<Loc>("patio");
   const [bottles, setBottles] = useState<string[]>(() => seedBottles(item, "patio"));
-  const [storeCountStr, setStoreCountStr] = useState<string>(() => fmt(item.store));
-  const storeCount = Number(storeCountStr);
-  const storeCountValid = Number.isInteger(storeCount) && storeCount >= 0;
-  const storeDelta = storeCountValid ? Math.round((storeCount - item.store) * 100) / 100 : 0;
+  // For case-sized bottles (beer, by default), a bar count is just an integer — no
+  // half or quarter. One state string drives that input across bars.
+  const [barCountStr, setBarCountStr] = useState<string>(() => fmt(item.patio));
+  // Store count. Case-sized bottles count IN CASES — "1 case" not "24 bottles" — because
+  // that's how the storeroom is actually walked. The server still stores bottles, so a
+  // typed value is multiplied by case_size before saving.
+  const storeIsCases = item.case_size > 1;
+  const [storeCountStr, setStoreCountStr] = useState<string>(() =>
+    storeIsCases ? fmt(item.store / item.case_size) : fmt(item.store));
+  const storeCountRaw = Number(storeCountStr);
+  const storeCountValid = Number.isInteger(storeCountRaw) && storeCountRaw >= 0;
+  // What the input value translates to in bottles — what the server sees.
+  const storeCountBottles = storeCountValid ? storeCountRaw * (storeIsCases ? item.case_size : 1) : 0;
+  const storeDelta = storeCountValid ? Math.round((storeCountBottles - item.store) * 100) / 100 : 0;
 
   const presets = item.cat === "BEER" ? [1, 6, 12, 24] : [1, 2, 3, 6];
   const barLevels = bottles.map(Number).filter((n) => Number.isFinite(n) && n > 0);
@@ -216,7 +226,7 @@ function Sheet({
           const open = openLabel(item, k);
           return (
             <div className={`c ${k}`} key={k}>
-              <div className="v">{fmtQty(item.cat, item[k])}</div>
+              <div className="v">{fmtQty(item.cat, item[k], item.case_size)}</div>
               <div className="k">{LOC_SHORT[k]}</div>
               {open && <div className="o" title={levelsAt(item, k).join(" + ")}>{open}</div>}
             </div>
@@ -224,12 +234,10 @@ function Sheet({
         })}
       </div>
 
-      {/* Give/Receive/Count are what staff do dozens of times a shift, so they get the
-          primary tab strip. Transfer and Wastage are rarer and, for wastage, destructive —
-          demoted to smaller secondary buttons below rather than competing for equal space
-          in what used to be a 5-wide, horizontally-scrolling strip. */}
+      {/* Staff do Give / Receive / Transfer only — Count and Record wastage belong to
+          the owner. Hiding the buttons is cosmetic; the server also refuses the actions. */}
       <div className="actseg">
-        {(["give", "receive", "count"] as SheetAct[]).map((a) => (
+        {((user.role === "owner" ? ["give", "receive", "count"] : ["give", "receive"]) as SheetAct[]).map((a) => (
           <button key={a} className={act === a ? "on" : ""} onClick={() => setAct(a)}>
             {a === "give" ? "Give" : a === "receive" ? "Receive" : "Count"}
           </button>
@@ -239,9 +247,11 @@ function Sheet({
         <button className={`actmore-btn${act === "transfer" ? " on" : ""}`} onClick={() => setAct("transfer")}>
           Transfer stock
         </button>
-        <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
-          Record wastage
-        </button>
+        {user.role === "owner" && (
+          <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
+            Record wastage
+          </button>
+        )}
       </div>
 
       {act === "give" && (
@@ -262,7 +272,7 @@ function Sheet({
           <button className="commit" disabled={!bar || pending}
             onClick={() => run(
               () => giveOut(item.id, giveQty, bar === "unknown" ? null : bar!),
-              `${fmtQty(item.cat, giveQty)} × ${item.name} → ${bar === "unknown" ? "unknown bar" : LOC_SHORT[bar as Loc]}`)}>
+              `${fmtQty(item.cat, giveQty, item.case_size)} × ${item.name} → ${bar === "unknown" ? "unknown bar" : LOC_SHORT[bar as Loc]}`)}>
             {pending ? "Giving…" : "Give out"}
           </button>
         </div>
@@ -289,7 +299,7 @@ function Sheet({
           )}
           <button className="commit green" disabled={pending}
             onClick={() => run(() => receive(item.id, recvQty, recvLoc),
-              `+${fmtQty(item.cat, recvQty)} × ${item.name} → ${LOC_SHORT[recvLoc]}`)}>
+              `+${fmtQty(item.cat, recvQty, item.case_size)} × ${item.name} → ${LOC_SHORT[recvLoc]}`)}>
             {pending ? "Adding…" : recvLoc === "store" ? "Add to store" : `Add to ${LOC_SHORT[recvLoc]}`}
           </button>
         </div>
@@ -340,7 +350,7 @@ function Sheet({
           )}
           <button className="commit" disabled={pending || transQty <= 0}
             onClick={() => run(() => transferBar(item.id, transQty, transFrom, transTo),
-              `Transferred ${fmtQty(item.cat, transQty)} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
+              `Transferred ${fmtQty(item.cat, transQty, item.case_size)} × ${item.name} (${LOC_SHORT[transFrom]} → ${LOC_SHORT[transTo]})`)}>
             {pending ? "Transferring…" : "Transfer stock"}
           </button>
         </div>
@@ -383,10 +393,10 @@ function Sheet({
           )}
           <button className="commit red" disabled={pending || wasteQty <= 0}
             onClick={() => {
-              if (confirm(`Record ${fmtQty(item.cat, wasteQty)} × ${item.name} as wasted from `
+              if (confirm(`Record ${fmtQty(item.cat, wasteQty, item.case_size)} × ${item.name} as wasted from `
                 + `${LOC_SHORT[wasteLoc]} (${wasteReason})?`)) {
                 run(() => logWaste(item.id, wasteQty, wasteLoc, wasteReason),
-                  `Recorded ${fmtQty(item.cat, wasteQty)} × ${item.name} waste (${wasteReason})`);
+                  `Recorded ${fmtQty(item.cat, wasteQty, item.case_size)} × ${item.name} waste (${wasteReason})`);
               }
             }}>
             {pending ? "Recording…" : "Record wastage"}
@@ -402,8 +412,8 @@ function Sheet({
               <button key={k} data-t={k} className={`pick${countLoc === k ? " sel" : ""}`}
                 onClick={() => {
                   setCountLoc(k);
-                  if (k === "store") setStoreCountStr(fmt(item.store));
-                  else setBottles(seedBottles(item, k));
+                  if (k === "store") setStoreCountStr(storeIsCases ? fmt(item.store / item.case_size) : fmt(item.store));
+                  else { setBottles(seedBottles(item, k)); setBarCountStr(fmt(item[k])); }
                 }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
               </button>
@@ -412,32 +422,76 @@ function Sheet({
 
           {countLoc === "store" ? (
             <>
-              <div className="lbl">Counted amount</div>
+              <div className="lbl">{storeIsCases ? "How many cases?" : "Counted amount"}</div>
               <div className="qsel">
                 <button className="step" aria-label="One fewer"
-                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCount : 0) - 1)))}>−</button>
+                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCountRaw : 0) - 1)))}>−</button>
                 <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
                   value={storeCountStr} onChange={(e) => setStoreCountStr(e.target.value)} />
                 <button className="step" aria-label="One more"
-                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCount : 0) + 1)))}>+</button>
+                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCountRaw : 0) + 1)))}>+</button>
               </div>
-              <div className="cnote">
-                {!storeCountValid
-                  ? "Enter a whole number"
-                  : storeDelta === 0
-                    ? `No change — store stays at ${fmt(item.store)}`
-                    : `Store: ${fmt(item.store)} → ${fmt(storeCount)} (${storeDelta > 0 ? "+" : ""}${fmt(storeDelta)})`}
-              </div>
+              {(() => {
+                // Nothing in the UI should talk in bottles when the item lives in cases.
+                const wasUnits = storeIsCases ? item.store / item.case_size : item.store;
+                const newUnits = storeCountRaw;
+                const deltaUnits = storeCountValid ? newUnits - wasUnits : 0;
+                const unit = storeIsCases ? "case" : "bottle";
+                const pluralise = (n: number) => `${fmt(n)} ${unit}${Math.abs(n) === 1 ? "" : "s"}`;
+                return (
+                  <div className="cnote">
+                    {!storeCountValid ? "Enter a whole number"
+                      : deltaUnits === 0 ? `No change — store stays at ${pluralise(wasUnits)}`
+                      : `Store: ${pluralise(wasUnits)} → ${pluralise(newUnits)} (${deltaUnits > 0 ? "+" : ""}${fmt(deltaUnits)})`}
+                  </div>
+                );
+              })()}
               <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
-                The storeroom counts whole sealed bottles. If the counted number is lower,
-                prefer logging a Waste for the missing bottles — a count overwrites the
-                running total and hides where the loss came from.
+                {storeIsCases
+                  ? `Count whole cases (${item.case_size} bottles each). If the number is lower, prefer logging a Waste for the missing cases — a count overwrites the running total and hides where the loss came from.`
+                  : "The storeroom counts whole sealed bottles. If the counted number is lower, prefer logging a Waste for the missing bottles — a count overwrites the running total and hides where the loss came from."}
               </div>
               <button className="commit amber" disabled={pending || !storeCountValid || storeDelta === 0}
-                onClick={() => run(() => countStore(item.id, storeCount),
-                  `Store count: ${item.name} = ${fmt(storeCount)}`)}>
+                onClick={() => run(() => countStore(item.id, storeCountBottles),
+                  `Store count: ${item.name} = ${fmtQty(item.cat, storeCountBottles, item.case_size)}`)}>
                 {pending ? "Saving…" : "Set count"}
               </button>
+            </>
+          ) : item.case_size > 1 ? (
+            <>
+              {/* Case-sized bottles (beer by default) aren't poured half-empty — a bar
+                  holds whole sealed bottles. Integer count only, no fill levels. */}
+              <div className="lbl">How many bottles?</div>
+              <div className="qsel">
+                <button className="step" aria-label="One fewer"
+                  onClick={() => setBarCountStr(String(Math.max(0, (Math.floor(Number(barCountStr) || 0)) - 1)))}>−</button>
+                <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
+                  value={barCountStr} onChange={(e) => setBarCountStr(e.target.value)} />
+                <button className="step" aria-label="One more"
+                  onClick={() => setBarCountStr(String(Math.max(0, Math.floor(Number(barCountStr) || 0) + 1)))}>+</button>
+              </div>
+              {(() => {
+                const n = Math.max(0, Math.floor(Number(barCountStr) || 0));
+                const valid = Number.isInteger(Number(barCountStr)) && Number(barCountStr) >= 0;
+                const was = item[countLoc];
+                const delta = Math.round((n - was) * 100) / 100;
+                return (
+                  <>
+                    <div className="cnote">
+                      {!valid ? "Enter a whole number"
+                        : delta === 0 ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmt(was)}`
+                        : `${LOC_SHORT[countLoc]}: ${fmt(was)} → ${fmt(n)} (${delta > 0 ? "+" : ""}${fmt(delta)})`}
+                    </div>
+                    <button className="commit amber" disabled={pending || !valid || delta === 0}
+                      onClick={() => run(
+                        // Beer bottles are each "1" to the per-bottle breakdown — N bottles = [1,1,…,1].
+                        () => countBarBottles(item.id, countLoc, Array(n).fill(1)),
+                        `${LOC_SHORT[countLoc]} count: ${item.name} = ${fmt(n)}`)}>
+                      {pending ? "Saving…" : "Set count"}
+                    </button>
+                  </>
+                );
+              })()}
             </>
           ) : (
             <>

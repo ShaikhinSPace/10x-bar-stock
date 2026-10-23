@@ -59,3 +59,4 @@ graphify-out/
 # oh-my-claudecode operational state (sessions, replays, throttle timers).
 # Not source — matches the user-global ignore but anchored to work anywhere in the tree.
 .omc/
+.taste-skill/

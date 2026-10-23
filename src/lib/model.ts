@@ -75,6 +75,8 @@ export type Item = {
    * the truth either way.
    */
   patio_levels: number[]; back_levels: number[];
+  /** How many bottles make up a case. 1 = no case concept. Beer defaults to 24. */
+  case_size: number;
   /**
    * Extra categories beyond `cat`. `cat` stays the single main one that drives
    * every total, colour and the beer cases rule; these only widen what the
@@ -166,14 +168,21 @@ export function undoableMoveIds(moves: Move[]): Set<number> {
 export type Delivery = {
   batch: string; invoice: string; supplier: string | null;
   ts: string; user_name: string; user_id: number | null; bottles: number;
+  /** Sum of the per-line costs; null when no line carried one. */
+  cost: number | null;
   /** false when this delivery is paperwork only — all of its receive moves share the flag. */
   affects_stock: boolean;
   // item_id is what lets a booked delivery be loaded back into the editor.
-  lines: { item_id: number; item: string; cat: Cat; qty: number }[];
+  lines: { item_id: number; item: string; cat: Cat; qty: number; cost: number | null; case_size: number | null }[];
 };
 
 /** One line of a delivery being drafted on the Delivery tab. */
-export type DeliveryLine = { itemId: number; qty: number };
+export type DeliveryLine = {
+  itemId: number; qty: number;
+  cost?: number | null;
+  /** Bottles per case AS RECEIVED for this line. Omit for loose bottles. */
+  caseSize?: number | null;
+};
 
 export type SessionUser = {
   id: number; name: string; username: string; role: "owner" | "staff";
@@ -200,10 +209,13 @@ const CASE_SIZE = 24;
  * Reserved for on-screen numbers only — CSV/Excel exports stay in raw bottle
  * counts, since that's what real spreadsheet math needs.
  */
-export function fmtQty(cat: Cat, n: number): string {
-  if (cat !== "BEER" || n < CASE_SIZE) return fmt(n);
-  const cases = Math.floor(n / CASE_SIZE);
-  const rem = Math.round((n - cases * CASE_SIZE) * 100) / 100;
+export function fmtQty(cat: Cat, n: number, caseSize: number = CASE_SIZE): string {
+  // "Counts in cases" is now driven by case_size, not a hardcoded BEER rule.
+  // Beer defaults to 24; the owner can change any item from Manage. caseSize <= 1
+  // means "no case concept" — show plain bottles.
+  if (caseSize <= 1 || n < caseSize) return fmt(n);
+  const cases = Math.floor(n / caseSize);
+  const rem = Math.round((n - cases * caseSize) * 100) / 100;
   const label = `${cases} case${cases === 1 ? "" : "s"}`;
   return rem > 0 ? `${label} + ${fmt(rem)}` : label;
 }

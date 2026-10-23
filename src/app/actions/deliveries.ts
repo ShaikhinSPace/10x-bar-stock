@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { sql, type DeliveryLine } from "@/lib/db";
 import { applyDeliveryEdit } from "@/lib/delivery-edit";
-import { requireUser } from "@/lib/auth";
+import { requireOwner, requireUser } from "@/lib/auth";
 import { attempt, whole, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
@@ -23,21 +23,30 @@ import { attempt, whole, type Result } from "./_shared";
  * aren't double-counted.
  */
 export async function receiveDelivery(
-  lines: DeliveryLine[], invoice: string, supplier: string, affectsStock = true
+  lines: DeliveryLine[], invoice: string, supplier: string, affectsStock = true,
 ): Promise<Result> {
   return attempt(async () => {
-    const u = await requireUser();
+    const u = await requireOwner();
     if (!Array.isArray(lines) || !lines.length) throw new Error("Add at least one bottle");
     if (lines.length > 300) throw new Error("That's too many lines for one delivery");
 
     // Merge duplicates so the same bottle scanned twice doesn't double-update.
-    const merged = new Map<number, number>();
+    // Costs for the same bottle sum. Case size: the later line wins when they
+    // disagree (realistic: owner is correcting rather than deliberately mixing).
+    const merged = new Map<number, { qty: number; cost: number | null; caseSize: number | null }>();
     for (const l of lines) {
       const id = Number(l.itemId);
       if (!Number.isInteger(id)) throw new Error("Unknown bottle in the delivery");
       const q = whole(l.qty, "Quantity");
       if (q < 1) throw new Error("Every line needs at least 1 bottle");
-      merged.set(id, (merged.get(id) ?? 0) + q);
+      const c = l.cost == null ? null : Number(l.cost);
+      if (c !== null && (!Number.isFinite(c) || c < 0)) throw new Error("Cost must be zero or more");
+      const cs = l.caseSize == null ? null : Math.max(1, Math.floor(Number(l.caseSize)));
+      const prev = merged.get(id);
+      const sumCost = prev && prev.cost !== null && c !== null ? Math.round((prev.cost + c) * 100) / 100
+        : c !== null ? c
+        : prev?.cost ?? null;
+      merged.set(id, { qty: (prev?.qty ?? 0) + q, cost: sumCost, caseSize: cs ?? prev?.caseSize ?? null });
     }
 
     const inv = invoice.trim();
@@ -45,7 +54,9 @@ export async function receiveDelivery(
     if (inv.length > 60) throw new Error("That invoice number is too long");
 
     const ids = [...merged.keys()];
-    const qtys = [...merged.values()];
+    const qtys = [...merged.values()].map((v) => v.qty);
+    const costs = [...merged.values()].map((v) => v.cost);
+    const caseSizes = [...merged.values()].map((v) => v.caseSize);
     const batch = `D${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     const sup = supplier.trim() || null;
     const affects = Boolean(affectsStock);
@@ -67,19 +78,20 @@ export async function receiveDelivery(
               left join items i on i.id = t.item_id and not i.archived
               where i.id is null)
         ), lines as (
-          select * from unnest(${ids}::int[], ${qtys}::numeric[]) as t(item_id, qty)
+          select * from unnest(${ids}::int[], ${qtys}::numeric[], ${costs}::numeric[], ${caseSizes}::int[])
+            as t(item_id, qty, cost, case_size)
         ), upd as (
           update items i set
             store = i.store + case when ${affects}::boolean then l.qty else 0 end
           from lines l, guard
           where i.id = l.item_id and not i.archived
-          returning i.id, i.name, i.cat, l.qty
+          returning i.id, i.name, i.cat, l.qty, l.cost, l.case_size
         )
         insert into moves
           (type, item_id, item_name, cat, qty, loc, user_id, user_name,
-           batch, invoice, supplier, affects_stock)
+           batch, invoice, supplier, affects_stock, cost, line_case_size)
         select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
-               ${u.id}, ${u.name}, ${batch}, ${inv}, ${sup}, ${affects}
+               ${u.id}, ${u.name}, ${batch}, ${inv}, ${sup}, ${affects}, upd.cost, upd.case_size
         from upd
         returning id`,
     ]);
@@ -112,7 +124,7 @@ export async function receiveDelivery(
  * owner's typing. Undo is still the way to remove a delivery entirely.
  */
 export async function editDelivery(
-  batch: string, lines: DeliveryLine[], invoice: string, supplier: string
+  batch: string, lines: DeliveryLine[], invoice: string, supplier: string,
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
@@ -122,13 +134,20 @@ export async function editDelivery(
     }
     if (lines.length > 300) throw new Error("That's too many lines for one delivery");
 
-    const merged = new Map<number, number>();
+    const merged = new Map<number, { qty: number; cost: number | null; caseSize: number | null }>();
     for (const l of lines) {
       const id = Number(l.itemId);
       if (!Number.isInteger(id)) throw new Error("Unknown bottle in the delivery");
       const q = whole(l.qty, "Quantity");
       if (q < 1) throw new Error("Every line needs at least 1 bottle");
-      merged.set(id, (merged.get(id) ?? 0) + q);
+      const c = l.cost == null ? null : Number(l.cost);
+      if (c !== null && (!Number.isFinite(c) || c < 0)) throw new Error("Cost must be zero or more");
+      const cs = l.caseSize == null ? null : Math.max(1, Math.floor(Number(l.caseSize)));
+      const prev = merged.get(id);
+      const sumCost = prev && prev.cost !== null && c !== null ? Math.round((prev.cost + c) * 100) / 100
+        : c !== null ? c
+        : prev?.cost ?? null;
+      merged.set(id, { qty: (prev?.qty ?? 0) + q, cost: sumCost, caseSize: cs ?? prev?.caseSize ?? null });
     }
 
     const inv = invoice.trim();
@@ -151,13 +170,15 @@ export async function editDelivery(
     const affects = existing.affects_stock !== false;
 
     const ids = [...merged.keys()];
-    const qtys = [...merged.values()];
+    const qtys = [...merged.values()].map((v) => v.qty);
+    const costs = [...merged.values()].map((v) => v.cost);
+    const caseSizes = [...merged.values()].map((v) => v.caseSize);
     const sup = supplier.trim() || null;
 
     // Shared with scripts/check-delivery-edit.mjs, which runs this exact statement
     // against a real database — see the module for why it is all-or-nothing.
     const rows = await applyDeliveryEdit(sql, {
-      batch, ids, qtys, invoice: inv, supplier: sup, affectsStock: affects,
+      batch, ids, qtys, costs, caseSizes, invoice: inv, supplier: sup, affectsStock: affects,
     });
 
     if (rows.length !== ids.length) {

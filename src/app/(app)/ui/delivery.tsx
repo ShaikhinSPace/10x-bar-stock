@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { cap, fmt, fmtQty, type DeliveryLine, type Item, type SessionUser, type Delivery as Booked } from "@/lib/model";
 import { editDelivery, receiveDelivery } from "../../actions";
 import { useAction } from "../shell";
-import { catColor } from "./shared";
+import { catColor, dayKey } from "./shared";
 
 /**
  * Deliveries arrive as one drop with many lines. Booking them one bottle at a
@@ -17,18 +17,35 @@ export function Delivery({
   items: Item[]; deliveries: Booked[]; user: SessionUser;
 }) {
   const { pending, run } = useAction();
-  const [lines, setLines] = useState<Map<number, number>>(new Map());
+  // Per-item draft. `qty` is total bottles (what the server stores). `caseSize` is
+  // bottles-per-case AS DELIVERED for this line, so beer orders that come in 24-packs
+  // one week and 30-packs the next both record truthfully. For case-sized items the UI
+  // edits cases; qty is cases × caseSize.
+  type Draft = { qty: number; cost: string; caseSize: number };
+  const [lines, setLines] = useState<Map<number, Draft>>(new Map());
   const [q, setQ] = useState("");
   const [invoice, setInvoice] = useState("");
   const [supplier, setSupplier] = useState("");
   // Paperwork-only: the owner has already added these bottles to stock manually (one by one
-  // through Receive, then counted the bar) and only now records the invoice. True by default
-  // for the common case; a paperwork booking logs the delivery but leaves the storeroom alone.
+  // through Receive, then counted the bar) and only now records the invoice. Default off —
+  // a normal delivery books stock. A paperwork booking logs the invoice without touching
+  // the storeroom a second time.
   const [paperwork, setPaperwork] = useState(false);
   // Non-null while correcting a booked delivery: same builder, different verb.
   const [editing, setEditing] = useState<Booked | null>(null);
 
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // Supplier autocomplete pulls unique past supplier names so re-typing "Republic
+  // National" doesn't fork into "Republic Nat'l" and friends.
+  const pastSuppliers = useMemo(
+    () => [...new Set(deliveries.map((d) => d.supplier).filter((s): s is string => !!s && s.trim() !== ""))].sort(),
+    [deliveries]
+  );
+  const invoiceTrim = invoice.trim();
+  // Inline duplicate check — server rejects dupes, surface it earlier so the user
+  // doesn't book, see a cryptic toast, then have to re-type.
+  const invoiceDup = invoiceTrim.length > 0 && deliveries.some((d) =>
+    d.invoice === invoiceTrim && (!editing || d.batch !== editing.batch));
   const needle = q.trim().toLowerCase();
   const matches = useMemo(
     () => (needle
@@ -38,22 +55,69 @@ export function Delivery({
   );
 
   const drafted = [...lines.entries()];
-  const totalBottles = drafted.reduce((a, [, n]) => a + n, 0);
+  const totalBottles = drafted.reduce((a, [, d]) => a + d.qty, 0);
+  // Per-line cost is a UNIT price (per bottle). Delivery total multiplies by qty.
+  // A half-typed line is excluded rather than coerced to NaN.
+  const unitPrice = (d: { cost: string }) => {
+    const n = Number(d.cost);
+    return d.cost.trim() === "" || !Number.isFinite(n) ? null : n;
+  };
+  const lineTotal = (qty: number, d: { cost: string }) => {
+    const u = unitPrice(d);
+    return u === null ? null : Math.round(qty * u * 100) / 100;
+  };
+  const totalCost = drafted.reduce((a, [, d]) => {
+    const lt = lineTotal(d.qty, d);
+    return lt === null ? a : a + lt;
+  }, 0);
+  const hasAnyCost = drafted.some(([, d]) => d.cost.trim() !== "");
   // What saving an edit would do to the storeroom overall: the new total minus what
   // this delivery already put there. Zero when only the paperwork changed.
   const netChange = editing ? totalBottles - editing.bottles : 0;
 
+  // setQty: user-initiated delete when quantity drops to 0 (the − button, the × button).
+  // setQtyKeep: edits from the number input itself — never drop the row, because the user
+  // is in the middle of clearing a value to retype it.
   const setQty = (id: number, n: number) =>
     setLines((prev) => {
       const next = new Map(prev);
-      if (n <= 0) next.delete(id); else next.set(id, n);
+      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1 };
+      if (n <= 0) next.delete(id); else next.set(id, { ...curr, qty: n });
+      return next;
+    });
+  const setQtyKeep = (id: number, n: number) =>
+    setLines((prev) => {
+      const next = new Map(prev);
+      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1 };
+      next.set(id, { ...curr, qty: Math.max(0, n) });
+      return next;
+    });
+  const setLineCost = (id: number, c: string) =>
+    setLines((prev) => {
+      const next = new Map(prev);
+      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1 };
+      next.set(id, { ...curr, cost: c });
+      return next;
+    });
+  // Changing bottles-per-case rescales qty so the "cases" number the user sees stays the same.
+  const setLineCaseSize = (id: number, newCS: number) =>
+    setLines((prev) => {
+      const next = new Map(prev);
+      const curr = next.get(id); if (!curr) return next;
+      const cases = Math.round(curr.qty / Math.max(1, curr.caseSize));
+      next.set(id, { ...curr, caseSize: Math.max(1, newCS), qty: cases * Math.max(1, newCS) });
       return next;
     });
 
   const add = (i: Item) => {
-    // Beer moves by the case; everything else a bottle at a time.
-    const step = i.cat === "BEER" ? 24 : 1;
-    setQty(i.id, (lines.get(i.id) ?? 0) + step);
+    // Case-sized bottles (beer, by default 24) step by the case; everything else a bottle at a time.
+    const cs = Math.max(1, i.case_size);
+    setLines((prev) => {
+      const next = new Map(prev);
+      const curr = next.get(i.id) ?? { qty: 0, cost: "", caseSize: cs };
+      next.set(i.id, { ...curr, qty: curr.qty + curr.caseSize });
+      return next;
+    });
     setQ("");
   };
 
@@ -69,7 +133,11 @@ export function Delivery({
   /** Load a booked delivery back into the builder above. */
   function edit(d: Booked) {
     setEditing(d);
-    setLines(new Map(d.lines.map((l) => [l.item_id, l.qty])));
+    setLines(new Map(d.lines.map((l) => {
+      const item = byId.get(l.item_id);
+      const cs = l.case_size ?? item?.case_size ?? 1;
+      return [l.item_id, { qty: l.qty, cost: l.cost === null ? "" : String(l.cost), caseSize: Math.max(1, cs) }];
+    })));
     setInvoice(d.invoice === "—" ? "" : d.invoice);
     setSupplier(d.supplier ?? "");
     // The edit preserves the delivery's own paperwork flag — a real delivery stays real,
@@ -80,7 +148,11 @@ export function Delivery({
   }
 
   function book() {
-    const payload: DeliveryLine[] = drafted.map(([itemId, qty]) => ({ itemId, qty }));
+    const payload: DeliveryLine[] = drafted.map(([itemId, d]) => ({
+      itemId, qty: d.qty,
+      cost: d.cost.trim() === "" ? null : Number(d.cost),
+      caseSize: d.caseSize > 1 ? d.caseSize : null,
+    }));
     const noun = `${totalBottles} bottles across ${drafted.length} item${drafted.length === 1 ? "" : "s"}`;
     // Only clear the form once it actually worked - a rejected edit (duplicate
     // invoice, a bottle that would go negative) has to stay on screen to be fixed.
@@ -119,11 +191,15 @@ export function Delivery({
           <div className="fld">
             <label>Invoice # <span className="req">required</span></label>
             <input value={invoice} onChange={(e) => setInvoice(e.target.value)}
-              autoComplete="off" placeholder="e.g. 88214" />
+              inputMode="numeric" autoComplete="off" placeholder="e.g. 88214" />
           </div>
           <div className="fld">
             <label>Supplier <span className="opt">optional</span></label>
-            <input value={supplier} onChange={(e) => setSupplier(e.target.value)} autoComplete="off" />
+            <input value={supplier} onChange={(e) => setSupplier(e.target.value)}
+              list="past-suppliers" autoComplete="off" />
+            <datalist id="past-suppliers">
+              {pastSuppliers.map((s) => <option key={s} value={s} />)}
+            </datalist>
           </div>
         </div>
 
@@ -156,8 +232,8 @@ export function Delivery({
             {matches.map((i) => (
               <button key={i.id} className="dhit" onClick={() => add(i)}>
                 <span className="dhn">{i.name}</span>
-                <span className="dhc">{cap(i.cat)} · {fmtQty(i.cat, i.store)} in store</span>
-                <span className="dhadd">{i.cat === "BEER" ? "+24" : "+1"}</span>
+                <span className="dhc">{cap(i.cat)} · {fmtQty(i.cat, i.store, i.case_size)} in store</span>
+                <span className="dhadd">+{i.case_size > 1 ? "1 case" : "1"}</span>
               </button>
             ))}
           </div>
@@ -176,12 +252,14 @@ export function Delivery({
           </div>
         ) : (
           <>
-            {drafted.map(([id, n]) => {
+            {/* Newest-added appears at the top — scrolling through a long list to see
+                the row you just added isn't it. */}
+            {[...drafted].reverse().map(([id, d]) => {
               const it = byId.get(id);
               if (!it) return null;
-              const step = it.cat === "BEER" ? 24 : 1;
-              // While editing, this line already contributed `was` to the storeroom,
-              // so the projection has to back that out before adding the new number.
+              const n = d.qty;
+              const isCase = d.caseSize > 1;
+              const cases = isCase ? Math.round(n / d.caseSize) : n;
               const was = editing?.lines.find((l) => l.item_id === id)?.qty ?? 0;
               return (
                 <div className="dline" key={id}>
@@ -189,17 +267,40 @@ export function Delivery({
                     <div className="t">{it.name}</div>
                     <div className="s">
                       {paperwork
-                        ? <>{fmtQty(it.cat, it.store)} in store · <span className="dlwas">no change</span></>
-                        : <>{fmtQty(it.cat, it.store)} in store → <b>{fmtQty(it.cat, it.store - was + n)}</b></>}
-                      {!paperwork && was > 0 && n !== was && <span className="dlwas"> was {fmtQty(it.cat, was)}</span>}
+                        ? <>{fmtQty(it.cat, it.store, it.case_size)} in store · <span className="dlwas">no change</span></>
+                        : <>{fmtQty(it.cat, it.store, it.case_size)} in store → <b>{fmtQty(it.cat, it.store - was + n, it.case_size)}</b></>}
+                      {!paperwork && was > 0 && n !== was && <span className="dlwas"> was {fmtQty(it.cat, was, it.case_size)}</span>}
+                      {isCase && <> · <b>{n}</b> bottles</>}
+                      {lineTotal(n, d) !== null && <> · line <b>${lineTotal(n, d)!.toFixed(2)}</b></>}
                     </div>
                   </div>
                   <div className="dl-qty">
-                    <button onClick={() => setQty(id, n - step)} aria-label={`Less ${it.name}`}>−</button>
-                    <input type="number" inputMode="numeric" min="0" value={n}
-                      onChange={(e) => setQty(id, Math.max(0, Math.floor(Number(e.target.value) || 0)))} />
-                    <button onClick={() => setQty(id, n + step)} aria-label={`More ${it.name}`}>+</button>
+                    <button onClick={() => setQty(id, Math.max(0, n - d.caseSize))} aria-label={isCase ? `One fewer case of ${it.name}` : `Less ${it.name}`}>−</button>
+                    <input type="number" inputMode="numeric" min="0"
+                      value={isCase ? cases : n}
+                      onChange={(e) => {
+                        const v = Math.max(0, Math.floor(Number(e.target.value) || 0));
+                        setQtyKeep(id, isCase ? v * d.caseSize : v);
+                      }} />
+                    <button onClick={() => setQty(id, n + d.caseSize)} aria-label={isCase ? `One more case of ${it.name}` : `More ${it.name}`}>+</button>
                   </div>
+                  {isCase && (
+                    <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 12, color: "var(--txt-3)" }}>
+                      × <input type="number" inputMode="numeric" min="1" value={d.caseSize}
+                        aria-label={`${it.name} bottles per case for this delivery`}
+                        style={{ width: 44, textAlign: "right", padding: "4px 6px",
+                                 background: "var(--surface-2)", border: "1px solid var(--line)",
+                                 borderRadius: "var(--r-sm)", color: "var(--txt)", fontSize: 12 }}
+                        onChange={(e) => setLineCaseSize(id, Math.max(1, Math.floor(Number(e.target.value) || 1)))} />
+                    </label>
+                  )}
+                  <input type="number" inputMode="decimal" min="0" step="0.01"
+                    placeholder="$ / bottle"
+                    aria-label={`${it.name} unit price per bottle`}
+                    style={{ width: 86, textAlign: "right", padding: "6px 8px",
+                             background: "var(--surface-2)", border: "1px solid var(--line)",
+                             borderRadius: "var(--r-sm)", color: "var(--txt)", fontSize: 13 }}
+                    value={d.cost} onChange={(e) => setLineCost(id, e.target.value)} />
                   <button className="dl-x" onClick={() => setQty(id, 0)} aria-label={`Remove ${it.name}`}>×</button>
                 </div>
               );
@@ -208,19 +309,25 @@ export function Delivery({
             <div className="dfoot">
               <div className="dsum">
                 <b>{fmt(totalBottles)}</b> bottles · {drafted.length} item{drafted.length === 1 ? "" : "s"}
+                {hasAnyCost && <> · <b>${totalCost.toFixed(2)}</b> total</>}
                 {paperwork && <div className="dnet">paperwork only · storeroom unchanged</div>}
                 {!paperwork && editing && netChange !== 0 && (
                   <div className="dnet">
                     storeroom {netChange > 0 ? "+" : "−"}{fmt(Math.abs(netChange))} once saved
                   </div>
                 )}
-                {!invoice.trim() && (
+                {!invoiceTrim && (
                   <div className="dwarn">
                     Add the invoice number to {editing ? "save this" : "book this"}
                   </div>
                 )}
+                {invoiceDup && (
+                  <div className="dwarn">
+                    Invoice {invoiceTrim} is already on a past delivery — use a different number
+                  </div>
+                )}
               </div>
-              <button className="commit green" disabled={pending || !invoice.trim()} onClick={book}>
+              <button className="commit green" disabled={pending || !invoiceTrim || invoiceDup} onClick={book}>
                 {pending
                   ? (editing ? "Saving…" : "Booking…")
                   : (editing
@@ -241,23 +348,31 @@ export function Delivery({
           <div className="empty" style={{ padding: 22 }}>
             No deliveries booked yet.
           </div>
-        ) : (
-          deliveries.map((d) => (
-            <details className={`inv${editing?.batch === d.batch ? " editing" : ""}${!d.affects_stock ? " paper" : ""}`} key={d.batch}>
-              <summary>
-                <span className="ino">
-                  {d.invoice}
-                  {!d.affects_stock && <span className="pbadge">paperwork</span>}
-                </span>
-                <span className="inmeta">
-                  {new Date(d.ts).toLocaleDateString("en-US",
-                    { day: "numeric", month: "short", year: "numeric" })}
-                  {d.supplier ? ` · ${d.supplier}` : ""}
-                </span>
-                <span className="incount">
-                  {fmt(d.bottles)}<small>bottles</small>
-                </span>
-              </summary>
+        ) : (() => {
+          // Day-break headers — same Today / Yesterday / "Sat, Oct 18" rhythm as
+          // Activity, so a scan here uses the same muscle memory.
+          const nowTs = Date.now();
+          let currentDay: string | null = null;
+          return deliveries.map((d) => {
+            const label = dayKey(+new Date(d.ts), nowTs);
+            const head = label !== currentDay ? ((currentDay = label), label) : null;
+            return (
+              <div key={d.batch}>
+                {head && <div className="day" style={{ margin: "14px 0 6px", color: "var(--txt-3)", fontSize: 11, fontWeight: 600, letterSpacing: 1 }}>{head.toUpperCase()}</div>}
+                <details className={`inv${editing?.batch === d.batch ? " editing" : ""}${!d.affects_stock ? " paper" : ""}`}>
+                  <summary>
+                    <span className="ino">
+                      {d.invoice}
+                      {!d.affects_stock && <span className="pbadge">paperwork</span>}
+                    </span>
+                    <span className="inmeta">
+                      {d.supplier || <span style={{ color: "var(--txt-3)" }}>no supplier</span>}
+                      {d.cost !== null && <span style={{ marginLeft: 8 }}>· ${d.cost.toFixed(2)}</span>}
+                    </span>
+                    <span className="incount">
+                      {fmt(d.bottles)}<small>bottles</small>
+                    </span>
+                  </summary>
               <div className="inbody">
                 <div className="inlines">
                   {d.lines.map((l) => (
@@ -282,9 +397,11 @@ export function Delivery({
                   )}
                 </div>
               </div>
-            </details>
-          ))
-        )}
+                </details>
+              </div>
+            );
+          });
+        })()}
       </div>
     </>
   );
