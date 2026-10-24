@@ -5,7 +5,9 @@ import { sql } from "./db";
 import type { SessionUser } from "./model";
 
 // ponytail: scrypt + an HMAC-signed cookie instead of an auth library. ~10 staff,
-// username/password only, no OAuth or password reset. Swap in Auth.js if either arrives.
+// username/password only. The cookie carries a session_version read from users at
+// sign-in; bumping that column on reset or deactivate invalidates every
+// outstanding session for that user. Swap in Auth.js if OAuth arrives.
 
 const SECRET = process.env.SESSION_SECRET;
 if (!SECRET || SECRET.length < 32) {
@@ -36,7 +38,11 @@ export function verifyPassword(pw: string, stored: string): boolean {
 const signature = (body: string) => createHmac("sha256", SECRET).update(body).digest("hex");
 
 export async function startSession(userId: number) {
-  const body = `${userId}.${Date.now() + MAX_AGE_S * 1000}`;
+  // Pin the current session_version into the cookie — once this user is reset
+  // or deactivated, the row's version increments and this cookie stops matching.
+  const [row] = await sql`select session_version from users where id = ${userId}`;
+  const version = Number(row?.session_version ?? 1);
+  const body = `${userId}.${Date.now() + MAX_AGE_S * 1000}.${version}`;
   (await cookies()).set(COOKIE, `${body}.${signature(body)}`, {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
@@ -60,13 +66,21 @@ export async function getSession(): Promise<Session | null> {
   const want = Buffer.from(signature(body), "hex");
   if (sig.length !== want.length || !timingSafeEqual(sig, want)) return null;
 
-  const [idStr, expStr] = body.split(".");
+  const [idStr, expStr, verStr] = body.split(".");
   if (Number(expStr) < Date.now()) return null;
 
   const rows = await sql`
-    select id, name, username, role from users
+    select id, name, username, role, session_version from users
     where id = ${Number(idStr)} and active`;
-  return (rows[0] as Session) ?? null;
+  const row = rows[0];
+  if (!row) return null;
+  // Reject if the cookie was issued before a reset or deactivation. Older
+  // cookies without the version segment fail the Number()/compare too — treat
+  // them as expired, forcing a fresh sign-in rather than letting an unversioned
+  // cookie slip through.
+  const cookieVer = Number(verStr);
+  if (!Number.isFinite(cookieVer) || cookieVer !== Number(row.session_version)) return null;
+  return { id: row.id as number, name: row.name as string, username: row.username as string, role: row.role as Session["role"] };
 }
 
 /* ---------------- login brute-force throttle ---------------- */

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { CAT_MAX, cap, fmt, fmtQty, normCat, type Cat, type Category, type Item, type SessionUser, type Staff } from "@/lib/model";
-import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, setCaseSize, setReorderIgnore, setReorderLevel, setUserActive, type Result } from "../../actions";
+import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, resetPassword, setCaseSize, setReorderIgnore, setReorderLevel, setUserActive, type Result } from "../../actions";
 import { useAction } from "../shell";
 import { SortDir, catColor, rankIn, sortRows, useColumnSort, useEscapeClose, usePopoverClose } from "./shared";
 
@@ -177,6 +177,18 @@ export function Manage({
               <div className="t">{s.name}</div>
               <div className="s">@{s.username} · {s.role}{s.active ? "" : " · disabled"}</div>
             </div>
+            {s.active && (
+              <button className="toggle"
+                onClick={() => {
+                  // ponytail: window.prompt is coarse but keeps the diff tiny. Upgrade
+                  // to a masked inline form once more account settings land here.
+                  const pw = window.prompt(`New password for ${s.name} (min 8 chars):`);
+                  if (pw === null) return;
+                  run(() => resetPassword(s.id, pw), `${s.name}'s password reset`);
+                }}>
+                Reset password
+              </button>
+            )}
             {s.id !== user.id && (
               <button className="toggle"
                 onClick={() => run(() => setUserActive(s.id, !s.active),

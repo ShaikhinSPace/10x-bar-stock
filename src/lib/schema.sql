@@ -11,6 +11,12 @@ create table if not exists users (
   created_at    timestamptz not null default now()
 );
 
+-- Bumped by resetPassword and by deactivation so every existing session for
+-- that user is invalidated. The cookie carries the version it was issued at;
+-- getSession rejects a mismatch. 0 doesn't exist (default is 1) so a reset is
+-- always a step up, never a reset to zero.
+alter table users add column if not exists session_version int not null default 1;
+
 -- Bottle categories. Owned by the database, not by the code: the owner creates,
 -- renames, reorders, merges and deletes them from Manage, so this table is the
 -- source of truth for which categories exist and what order they display in.
