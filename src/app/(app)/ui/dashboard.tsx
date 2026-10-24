@@ -5,6 +5,7 @@ import { LOC_LABEL, bizDayKey, cap, fmt, fmtQty, needsReorder, type Cat, type Ca
 import { setReorderIgnore, type Result } from "../../actions";
 import { useAction } from "../shell";
 import { BottleSheet, DAY, LOC_COLOR, SortTh, catBarColor, last7, sortRows, sumAt, useColumnSort } from "./shared";
+import { Stocktake } from "./stock";
 
 export function Dashboard({
   items, moves, now, user, cats,
@@ -13,6 +14,22 @@ export function Dashboard({
 }) {
   const { pending, run } = useAction();
   const [sheetId, setSheetId] = useState<number | null>(null);
+  const [sweepStep, setSweepStep] = useState<number | null>(null); // null = closed, 0..2 = step index
+  const SWEEP: Loc[] = ["patio", "back", "store"];
+
+  // The sweep takes over the viewport — same pattern as Stock's own standalone Count,
+  // which fully replaces its page body while active. Dashboard does the same so the
+  // user focuses on walking the list without the strip and tables underneath competing.
+  if (sweepStep !== null) {
+    return (
+      <Stocktake
+        items={items} loc={SWEEP[sweepStep]} user={user} cats={cats}
+        step={`${sweepStep + 1} of ${SWEEP.length}`}
+        onClose={() => setSweepStep(null)}
+        onFinish={() => setSweepStep(sweepStep + 1 < SWEEP.length ? sweepStep + 1 : null)}
+      />
+    );
+  }
 
   const since = now - 7 * DAY;
   const storeTot = sumAt(items, "store");
@@ -81,11 +98,20 @@ export function Dashboard({
             <div className={`t-item${wasteToday > 0 ? " warn" : ""}`}><div className="tv">{fmt(wasteToday)}</div><div className="tk">Wasted</div></div>
           </div>
           <div className="today-counts">
-            Last count — <b>Patio</b> {countLabel("patio")}
-            <span className="sep"> · </span>
-            <b>Back</b> {countLabel("back")}
-            <span className="sep"> · </span>
-            <b>Store</b> {countLabel("store")}
+            <span className="today-last">
+              Last count — <b>Patio</b> {countLabel("patio")}
+              <span className="sep"> · </span>
+              <b>Back</b> {countLabel("back")}
+              <span className="sep"> · </span>
+              <b>Store</b> {countLabel("store")}
+            </span>
+            {user.role === "owner" && (
+              <button className="today-count-btn" onClick={() => setSweepStep(0)}>
+                {[countLabel("patio"), countLabel("back"), countLabel("store")].every((s) => s !== "never" && s !== "not today")
+                  ? "Re-count today"
+                  : "Count today →"}
+              </button>
+            )}
           </div>
         </div>
 

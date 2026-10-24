@@ -35,6 +35,10 @@ export function Delivery({
   const [editing, setEditing] = useState<Booked | null>(null);
 
   const byId = useMemo(() => new Map(items.map((i) => [i.id, i])), [items]);
+  // Pinned once per mount — the day-break labels ("Today", "Yesterday") rely on
+  // this. Date.now() in render (even inside useMemo) trips the React Compiler
+  // purity rule; useState's init runs exactly once and is allowed.
+  const [renderedAtTs] = useState<number>(() => Date.now());
   // Supplier autocomplete pulls unique past supplier names so re-typing "Republic
   // National" doesn't fork into "Republic Nat'l" and friends.
   const pastSuppliers = useMemo(
@@ -350,11 +354,12 @@ export function Delivery({
           </div>
         ) : (() => {
           // Day-break headers — same Today / Yesterday / "Sat, Oct 18" rhythm as
-          // Activity, so a scan here uses the same muscle memory.
-          const nowTs = Date.now();
+          // Activity, so a scan here uses the same muscle memory. renderedAtTs is
+          // pinned at component top (impure Date.now() in render would trip the
+          // React Compiler purity rule).
           let currentDay: string | null = null;
           return deliveries.map((d) => {
-            const label = dayKey(+new Date(d.ts), nowTs);
+            const label = dayKey(+new Date(d.ts), renderedAtTs);
             const head = label !== currentDay ? ((currentDay = label), label) : null;
             return (
               <div key={d.batch}>
