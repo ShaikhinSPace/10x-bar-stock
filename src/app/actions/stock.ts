@@ -366,6 +366,15 @@ export async function addEntry(
     if (atMs > Date.now() + 5 * 60 * 1000) throw new Error("Can't add an entry dated in the future");
     const tsIso = new Date(atMs).toISOString();
 
+    // Backdating guard: if a count already exists on this bottle AFTER the chosen
+    // time, current totals are already post-count. Writing the move to history is
+    // fine (shift usage and the POS tally need it), but applying it to current
+    // stock would double-dip against reality the count already captured.
+    const [latest] = await sql`
+      select max(ts) as ts from moves where type = 'count' and item_id = ${itemId}`;
+    const latestCountTs = latest?.ts ? new Date(latest.ts as string).getTime() : 0;
+    const skipStock = latestCountTs > 0 && atMs <= latestCountTs;
+
     if (type === "receive") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
@@ -373,22 +382,31 @@ export async function addEntry(
       // a bar receive drops that bar's open-bottle breakdown since the new bottles'
       // composition isn't known (same as a backdated give).
       if (!isLoc(to)) throw new Error("Pick where it's received");
-      const rows = await sql`
-        with prev as (
-          select id, name, cat from items where id = ${itemId} and not archived
-        ), upd as (
-          update items set
-            store = store + case when ${to}::text = 'store' then ${q}::numeric else 0 end,
-            patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
-            back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
-            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
-          where id = ${itemId} and not archived returning id
-        )
-        insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-        select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
-        from prev join upd on upd.id = prev.id returning id`;
-      if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      if (skipStock) {
+        const rows = await sql`
+          with prev as (select id, name, cat from items where id = ${itemId} and not archived)
+          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
+          select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
+          from prev returning id`;
+        if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      } else {
+        const rows = await sql`
+          with prev as (
+            select id, name, cat from items where id = ${itemId} and not archived
+          ), upd as (
+            update items set
+              store = store + case when ${to}::text = 'store' then ${q}::numeric else 0 end,
+              patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
+              back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
+              patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+              back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
+            where id = ${itemId} and not archived returning id
+          )
+          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
+          select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
+          from prev join upd on upd.id = prev.id returning id`;
+        if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      }
     } else if (type === "give") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
@@ -400,38 +418,59 @@ export async function addEntry(
       // Strict null (not loose !=): a stray undefined from a direct POST shouldn't silently
       // land as an "unknown bar" give — reject it like any other invalid loc value.
       if (!(to === null || (isLoc(to) && to !== "store"))) throw new Error("Give to a bar, or leave the bar unknown");
-      const rows = await sql`
-        with prev as (
-          select id, name, cat from items where id = ${itemId} and not archived
-        ), upd as (
-          update items set
-            store = store - ${q},
-            patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
-            back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-            patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
-            back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
-          where id = ${itemId} and not archived and store >= ${q} returning id
-        )
-        insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-        select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
-        from prev join upd on upd.id = prev.id returning id`;
-      if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
+      if (skipStock) {
+        // No store >= q guard: the backdated give already happened in the past, when
+        // the storeroom's number may have been higher. Any shortfall is sorted out
+        // by the newer count that superseded it.
+        const rows = await sql`
+          with prev as (select id, name, cat from items where id = ${itemId} and not archived)
+          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
+          select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
+          from prev returning id`;
+        if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      } else {
+        const rows = await sql`
+          with prev as (
+            select id, name, cat from items where id = ${itemId} and not archived
+          ), upd as (
+            update items set
+              store = store - ${q},
+              patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
+              back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
+              patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
+              back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
+            where id = ${itemId} and not archived and store >= ${q} returning id
+          )
+          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
+          select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
+          from prev join upd on upd.id = prev.id returning id`;
+        if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
+      }
     } else {
       // count: the STORE count. It reconciles the storeroom to the counted figure now and
-      // logs a count move dated to the chosen day, so its drop (from_val -> to_val) buckets
-      // into that shift as consumed. Store is whole sealed bottles. Caller enters the
-      // current physical count; the day just says which shift it closes.
+      // logs a count move dated to the chosen day. If a NEWER count already exists, don't
+      // overwrite store (that newer count is the truth); just log this one for the shift
+      // it closes.
       const v = whole(qty, "Counted amount");
-      const rows = await sql`
-        with prev as (
-          select id, name, cat, store as v from items where id = ${itemId} and not archived
-        ), upd as (
-          update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
-        )
-        insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
-        select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
-        from prev join upd on upd.id = prev.id returning id`;
-      if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      if (skipStock) {
+        const rows = await sql`
+          with prev as (select id, name, cat, store as v from items where id = ${itemId} and not archived)
+          insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
+          select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
+          from prev returning id`;
+        if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      } else {
+        const rows = await sql`
+          with prev as (
+            select id, name, cat, store as v from items where id = ${itemId} and not archived
+          ), upd as (
+            update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
+          )
+          insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
+          select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
+          from prev join upd on upd.id = prev.id returning id`;
+        if (!rows.length) throw new Error("That bottle is no longer in the list.");
+      }
     }
     refresh();
   });
