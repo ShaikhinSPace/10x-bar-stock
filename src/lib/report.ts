@@ -274,27 +274,34 @@ async function wastageSection(cur: Window, prev: Window): Promise<PdfSection> {
   };
 }
 
-async function varianceSection(cur: Window): Promise<PdfSection> {
+/**
+ * Store corrections = true variance (store only moves via logged entries).
+ * Bar usage = the shift's consumption (what got poured). Different kinds
+ * of signal, different sections.
+ */
+async function storeCorrectionsSection(cur: Window): Promise<PdfSection> {
   const rows = await sql`
-    select m.ts, m.item_name, m.cat, m.loc, m.from_val, m.to_val, m.user_name
+    select m.ts, m.item_name, m.cat, m.from_val, m.to_val, m.user_name
     from moves m join items i on i.id = m.item_id and not i.archived
-    where m.type = 'count' and m.ts >= ${cur.from.toISOString()} and m.ts < ${cur.to.toISOString()}
+    where m.type = 'count' and m.loc = 'store'
+      and m.ts >= ${cur.from.toISOString()} and m.ts < ${cur.to.toISOString()}
       and coalesce(m.to_val,0) <> coalesce(m.from_val,0)
     order by abs(coalesce(m.to_val,0) - coalesce(m.from_val,0)) desc
     limit 25`;
   return {
-    title: "Count corrections",
-    note: "Where a physical count disagreed with the system, biggest gap first. A negative gap is stock "
-      + "that left without a matching entry; a positive one usually means a delivery or return went unlogged.",
-    empty: "No counts changed a figure this period.",
+    title: "Store corrections",
+    note: "Where a storeroom count disagreed with the system, biggest gap first. "
+      + "The storeroom only moves through logged entries, so any gap is unlogged — "
+      + "a negative gap is stock that left without a matching entry; a positive one "
+      + "usually means a delivery or return went unrecorded.",
+    empty: "No storeroom counts moved the figure this period.",
     columns: [
       { header: "Date", width: 1 },
-      { header: "Bottle", width: 2.4 },
-      { header: "Location", width: 1.1 },
+      { header: "Bottle", width: 2.6 },
       { header: "Expected", width: 1, align: "right" },
       { header: "Counted", width: 1, align: "right" },
       { header: "Gap", width: 1, align: "right" },
-      { header: "Counted by", width: 1.2 },
+      { header: "Counted by", width: 1.4 },
     ],
     rows: rows.map((r) => {
       const cat = r.cat as Cat;
@@ -302,10 +309,48 @@ async function varianceSection(cur: Window): Promise<PdfSection> {
       const gap = Math.round((to - from) * 100) / 100;
       return [
         new Date(r.ts).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        r.item_name,
+        fmtQty(cat, from), fmtQty(cat, to),
+        `${gap > 0 ? "+" : "-"}${fmtQty(cat, Math.abs(gap))}`, r.user_name,
+      ];
+    }),
+  };
+}
+
+async function barUsageSection(cur: Window): Promise<PdfSection> {
+  const rows = await sql`
+    select m.ts, m.item_name, m.cat, m.loc, m.from_val, m.to_val, m.user_name
+    from moves m join items i on i.id = m.item_id and not i.archived
+    where m.type = 'count' and m.loc in ('patio', 'back')
+      and m.ts >= ${cur.from.toISOString()} and m.ts < ${cur.to.toISOString()}
+      and coalesce(m.to_val,0) <> coalesce(m.from_val,0)
+    order by (coalesce(m.from_val,0) - coalesce(m.to_val,0)) desc
+    limit 25`;
+  return {
+    title: "Bar usage",
+    note: "What each bar used between its last two counts, biggest first. This is "
+      + "the figure to tally against the POS: used here minus sold there is the real "
+      + "variance. Pours and spills already live here; checked gives and deliveries "
+      + "explain the rest.",
+    empty: "No bar counts moved a figure this period.",
+    columns: [
+      { header: "Date", width: 1 },
+      { header: "Bottle", width: 2.4 },
+      { header: "Bar", width: 1.1 },
+      { header: "Before", width: 1, align: "right" },
+      { header: "After", width: 1, align: "right" },
+      { header: "Used", width: 1, align: "right" },
+      { header: "Counted by", width: 1.2 },
+    ],
+    rows: rows.map((r) => {
+      const cat = r.cat as Cat;
+      const from = num(r.from_val), to = num(r.to_val);
+      const used = Math.round((from - to) * 100) / 100;
+      return [
+        new Date(r.ts).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
         r.item_name, LOC_LABEL[r.loc as Loc] ?? r.loc,
         fmtQty(cat, from), fmtQty(cat, to),
-        // Same unit as the two columns it sits beside, not raw bottles.
-        `${gap > 0 ? "+" : "-"}${fmtQty(cat, Math.abs(gap))}`, r.user_name,
+        `${used >= 0 ? "" : "+"}${fmtQty(cat, Math.abs(used))}`, r.user_name,
       ];
     }),
   };
@@ -393,9 +438,12 @@ export async function periodStats(period: Period, now = new Date()) {
 export async function buildReport(period: Period, userName: string, now = new Date()): Promise<PdfReport> {
   const { cur, prev, pos, mCur, mPrev, openCur, openPrev } = await periodStats(period, now);
 
-  const [category, movers, reorder, wastage, variance, deliveries, stale] = await Promise.all([
+  const [category, movers, reorder, wastage, storeCorrections, barUsage, deliveries, stale] = await Promise.all([
     categorySection(cur, prev), moversSection(cur, prev), reorderSection(),
-    wastageSection(cur, prev), varianceSection(cur), deliveriesSection(cur, prev), staleSection(cur),
+    wastageSection(cur, prev),
+    // Split: store corrections = leakage signal; bar usage = POS tally input.
+    storeCorrectionsSection(cur), barUsageSection(cur),
+    deliveriesSection(cur, prev), staleSection(cur),
   ]);
 
   const closePrev = openCur; // the previous period closed where this one opened
@@ -424,6 +472,6 @@ export async function buildReport(period: Period, userName: string, now = new Da
       + `   ·   ${pos.items} active bottles   ·   store ${fmt(pos.store)} / patio ${fmt(pos.patio)} / back ${fmt(pos.back)}`,
     kpiHeader: ["", `Last ${LABEL[period]}`, `Previous ${LABEL[period]}`],
     kpis,
-    sections: [reorder, category, movers, variance, wastage, deliveries, stale],
+    sections: [reorder, category, movers, storeCorrections, barUsage, wastage, deliveries, stale],
   };
 }
