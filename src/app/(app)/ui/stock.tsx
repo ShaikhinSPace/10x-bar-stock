@@ -18,7 +18,6 @@ export function Stock({
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const [sheetId, setSheetId] = useState<number | null>(null);
   const [loc, setLoc] = useState<Loc>("store");
-  const [counting, setCounting] = useState(false);
   const [cat, setCat] = useState<string>("ALL");
   const [q, setQ] = useState("");
   const [lowOnly, setLowOnly] = useState(false);
@@ -55,12 +54,6 @@ export function Stock({
   // Only categories that actually have a bottle get a chip, in the owner's order.
   const chips = ["ALL", ...cats.map((c) => c.name).filter((c) => items.some((i) => inCat(i, c)))];
 
-  if (counting) {
-    return (
-      <Stocktake items={items} loc={loc} user={user} cats={cats} onClose={() => setCounting(false)} />
-    );
-  }
-
   return (
     <>
       <div className="ptitle">Stock <span className="sub">tap a bottle to log a move</span></div>
@@ -77,9 +70,10 @@ export function Stock({
         ))}
       </div>
 
-      {/* The barback's surface. The owner works bottle-by-bottle through the sheet,
-          so this stays off their Stock page rather than being a button everyone sees. */}
-      {user.role !== "owner" && (
+      {/* Bulk give-run from the store to a bar — anyone restocking a bar at open
+          benefits, so it's visible to owners and staff alike. Hidden on the bar
+          views because the flow is store → bar and the destination is the bar. */}
+      {loc === "store" && (
         <Link className="stk-start run" href="/stock/run">
           <span className="si">
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -94,26 +88,9 @@ export function Stock({
         </Link>
       )}
 
-      {/* Count the current location — bars AND store. The manager counts at open and
-          close; the system takes the difference. There is no separate "stocktake".
-          Owner-only — staff give/receive/transfer, counting belongs to the manager. */}
-      {user.role === "owner" && (
-      <button className="stk-start" onClick={() => setCounting(true)}>
-          <span className="si">
-            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"
-                strokeLinejoin="round" />
-              <rect x="9" y="3" width="6" height="4" rx="1" />
-              <path d="M9 12h6M9 16h4" strokeLinecap="round" />
-            </svg>
-          </span>
-          <span className="st">
-            <span className="n">Count {LOC_LABEL[loc]}</span>
-            <span className="b">Walk the list once and enter what&apos;s actually there</span>
-          </span>
-          <span className="sgo">›</span>
-      </button>
-      )}
+      {/* No per-location Count CTA here — the daily count is "Count today →" on the
+          Dashboard (Patio → Back → Store as one sweep). Mid-day per-bottle corrections
+          are still available via each bottle's own sheet. */}
 
       <div className="stats">
         {stats.map((s) => (
@@ -377,9 +354,14 @@ export function RunMode({
  * counts, and only a typed value that differs from expected is written.
  */
 export function Stocktake({
-  items, loc, user, cats, onClose,
+  items, loc, user, cats, onClose, onFinish, step,
 }: {
-  items: Item[]; loc: Loc; user: SessionUser; cats: Category[]; onClose: () => void;
+  items: Item[]; loc: Loc; user: SessionUser; cats: Category[];
+  onClose: () => void;
+  /** Called instead of onClose on a successful save, so a sweep can advance to the next loc. */
+  onFinish?: () => void;
+  /** When part of a sweep: "1 of 3". Shown after the location name. */
+  step?: string;
 }) {
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const { pending, run } = useAction();
@@ -478,9 +460,17 @@ export function Stocktake({
       () => {
         setCounts({});
         try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
-        onClose();
+        (onFinish ?? onClose)();
       },
     );
+  }
+
+  // In a sweep, a "no changes" count still counts as done — the user walked the list
+  // and nothing was off. Advance to the next step without hitting the server.
+  function skipToNext() {
+    setCounts({});
+    try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
+    (onFinish ?? onClose)();
   }
 
   /** Enter jumps to the next field so a count is one continuous run. */
@@ -497,7 +487,7 @@ export function Stocktake({
       <div className="stk-head">
         <div>
           <div className="ptitle" style={{ margin: 0 }}>
-            Count <span className="sub">{LOC_LABEL[loc]}</span>
+            Count <span className="sub">{LOC_LABEL[loc]}{step ? ` · ${step}` : ""}</span>
           </div>
           <div className="hint" style={{ marginTop: 4 }}>
             Type what you actually count. Leave a row blank if you didn&apos;t count it.
@@ -568,11 +558,20 @@ export function Stocktake({
           <b>{filledRows}</b> of {rows.length} counted
           {variances.length > 0 && <span className="vwarn"> · {variances.length} variance{variances.length === 1 ? "" : "s"}</span>}
         </div>
-        <button className="commit" disabled={pending || !variances.length} onClick={submit}>
-          {pending ? "Saving…"
-            : variances.length ? `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}`
-            : "No changes to save"}
-        </button>
+        {/* In a sweep, "no changes" is a valid outcome — advance without a server round-trip.
+            Standalone, the button stays disabled until the user actually has corrections. */}
+        {onFinish && !variances.length ? (
+          <button className="commit ghost" disabled={pending} onClick={skipToNext}>
+            No changes — continue
+          </button>
+        ) : (
+          <button className="commit" disabled={pending || !variances.length} onClick={submit}>
+            {pending ? "Saving…"
+              : variances.length
+                ? (onFinish ? `Save & continue (${variances.length})` : `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}`)
+                : "No changes to save"}
+          </button>
+        )}
       </div>
     </div>
   );
