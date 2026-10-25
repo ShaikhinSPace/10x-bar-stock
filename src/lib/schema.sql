@@ -153,6 +153,19 @@ create index if not exists moves_batch_idx on moves (batch) where batch is not n
 -- the duplicate-invoice guard queries this on every delivery booking
 create index if not exists moves_invoice_idx on moves (invoice) where invoice is not null;
 
+-- App-wide settings as a key-value table. Seeded with defaults; the owner
+-- edits them from Manage. Every value is text; the app casts as needed.
+create table if not exists settings (
+  key   text primary key,
+  value text not null
+);
+insert into settings (key, value) values
+  ('bar_name',                   '10X Bar'),
+  ('app_subtitle',               'STOCK CONTROL'),
+  ('business_day_cutoff_hour',   '3'),
+  ('business_tz',                'America/Chicago')
+on conflict (key) do nothing;
+
 -- Login brute-force throttle. Keyed by the ATTEMPTED username (not users.id) so a
 -- guessed or non-existent name is throttled the same way, which is also what keeps
 -- login from leaking whether a username exists. In-memory counting can't work on

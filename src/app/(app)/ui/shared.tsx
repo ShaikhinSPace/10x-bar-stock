@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { BUSINESS_TZ, LOCS, LOC_SHORT, WASTAGE_REASONS, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser, type WastageReason } from "@/lib/model";
+import { DEFAULT_SETTINGS, LOCS, LOC_SHORT, WASTAGE_REASONS, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser, type Settings, type WastageReason } from "@/lib/model";
 import { countBarBottles, countStore, giveOut, logWaste, receive, transferBar, undoMove, type Result } from "../../actions";
 import { useAction } from "../shell";
 
@@ -87,8 +87,8 @@ export const rankIn = (cats: Category[]) => (c: string) => {
 export const sumAt = (items: Item[], k: Loc) => items.reduce((a, i) => a + Math.max(0, i[k]), 0);
 
 /** The last 7 business days as Date objects (noon UTC of each, so TZ shifts can't drop a day). */
-export function last7(now: number): Date[] {
-  const todayKey = bizDayKey(now);
+export function last7(now: number, s: Settings = DEFAULT_SETTINGS): Date[] {
+  const todayKey = bizDayKey(now, s.business_day_cutoff_hour, s.business_tz);
   const out: Date[] = [];
   for (let i = 6; i >= 0; i--) {
     const [y, m, d] = addBusinessDays(todayKey, -i).split("-").map(Number);
@@ -97,14 +97,14 @@ export function last7(now: number): Date[] {
   return out;
 }
 
-export function dayKey(ts: number, now: number) {
-  const k = bizDayKey(ts), today = bizDayKey(now);
+export function dayKey(ts: number, now: number, s: Settings = DEFAULT_SETTINGS) {
+  const ch = s.business_day_cutoff_hour, tz = s.business_tz;
+  const k = bizDayKey(ts, ch, tz), today = bizDayKey(now, ch, tz);
   if (k === today) return "Today";
   if (k === addBusinessDays(today, -1)) return "Yesterday";
-  // Format in Chicago TZ so the label matches the business-day boundary.
   const [y, m, d] = k.split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-US", {
-    timeZone: BUSINESS_TZ, weekday: "short", month: "short", day: "numeric",
+    timeZone: tz, weekday: "short", month: "short", day: "numeric",
   });
 }
 

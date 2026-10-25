@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import { LOC_LABEL, LOC_SHORT, bizDayKey, cap, fmtQty, undoableMoveIds, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { addEntry, undoMove } from "../../actions";
-import { useAction } from "../shell";
+import { useAction, useSettings } from "../shell";
 import { dayKey, timeStr } from "./shared";
 
 export function Activity({
@@ -12,6 +12,7 @@ export function Activity({
   moves: Move[]; items: Item[]; user: SessionUser; now: number;
 }) {
   const { run, say } = useAction();
+  const settings = useSettings();
   const onUndo = (id: number) => run(() => undoMove(id), "Entry undone");
   const onToast = (t: { msg: string; error?: boolean }) => say(t.msg, t.error);
   const [filter, setFilter] = useState<string>("ALL");
@@ -93,7 +94,7 @@ export function Activity({
       ) : (
         filtered.map((m) => {
           const ts = +new Date(m.ts);
-          const dk = dayKey(ts, now);
+          const dk = dayKey(ts, now, settings);
           const head = dk !== currentDay ? ((currentDay = dk), dk) : null;
           const canUndo = undoable.has(m.id) && (user.role === "owner" || m.user_name === user.name);
 
@@ -179,9 +180,8 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const isCount = type === "count";
   const needsLoc = type === "give" || type === "receive"; // count is the storeroom only
 
-  // bizDayKey already returns "YYYY-MM-DD" in Chicago TZ — exactly the shape
-  // the <input type="date"> expects.
-  const dateOf = (ms: number) => bizDayKey(ms);
+  const settings = useSettings();
+  const dateOf = (ms: number) => bizDayKey(ms, settings.business_day_cutoff_hour, settings.business_tz);
   const [dateStr, setDateStr] = useState(() => dateOf(now));
   const todayStr = dateOf(now);
   const dateRef = useRef<HTMLInputElement>(null);

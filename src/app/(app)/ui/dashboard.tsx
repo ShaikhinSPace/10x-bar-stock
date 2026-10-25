@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { LOC_LABEL, bizDayKey, cap, fmt, fmtQty, needsReorder, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { setReorderIgnore, type Result } from "../../actions";
-import { useAction } from "../shell";
+import { useAction, useSettings } from "../shell";
 import { BottleSheet, DAY, LOC_COLOR, SortTh, catBarColor, last7, sortRows, sumAt, useColumnSort } from "./shared";
 import { Stocktake } from "./stock";
 
@@ -13,6 +13,8 @@ export function Dashboard({
   items: Item[]; moves: Move[]; now: number; user: SessionUser; cats: Category[];
 }) {
   const { pending, run } = useAction();
+  const settings = useSettings();
+  const ch = settings.business_day_cutoff_hour, tz = settings.business_tz;
   const [sheetId, setSheetId] = useState<number | null>(null);
   const [sweepStep, setSweepStep] = useState<number | null>(null); // null = closed, 0..2 = step index
   const SWEEP: Loc[] = ["patio", "back", "store"];
@@ -54,8 +56,8 @@ export function Dashboard({
 
   // "Today" strip — actionable facts for the current business day. Rolling 7d
   // tells you what's normal, "today" tells you what's happened this shift.
-  const todayKey = bizDayKey(now);
-  const todayMoves = moves.filter((m) => bizDayKey(+new Date(m.ts)) === todayKey);
+  const todayKey = bizDayKey(now, ch, tz);
+  const todayMoves = moves.filter((m) => bizDayKey(+new Date(m.ts), ch, tz) === todayKey);
   const giveToday = todayMoves
     .filter((m) => m.type === "give")
     .reduce((a, m) => a + (m.qty ?? 0), 0);
@@ -79,7 +81,7 @@ export function Dashboard({
   const countLabel = (loc: Loc) => {
     const ts = lastCountTs(loc);
     if (!ts) return "never";
-    if (bizDayKey(ts) !== todayKey) return "not today";
+    if (bizDayKey(ts, ch, tz) !== todayKey) return "not today";
     const mins = Math.max(1, Math.round((now - ts) / 60_000));
     return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
   };
@@ -317,12 +319,12 @@ function CategoryCard({ items, cats }: { items: Item[]; cats: Category[] }) {
 }
 
 function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
-  // Carry the business-day key alongside the date — matching on string keys
-  // (bizDayKey now returns "YYYY-MM-DD") avoids any UTC/local ms drift.
-  const per = last7(now).map((d) => ({ d, key: bizDayKey(d.getTime()), p: 0, b: 0, u: 0 }));
+  const s = useSettings();
+  const ch = s.business_day_cutoff_hour, tz = s.business_tz;
+  const per = last7(now, s).map((d) => ({ d, key: bizDayKey(d.getTime(), ch, tz), p: 0, b: 0, u: 0 }));
   for (const m of moves) {
     if (m.type !== "give") continue;
-    const md = bizDayKey(new Date(m.ts).getTime());
+    const md = bizDayKey(new Date(m.ts).getTime(), ch, tz);
     const slot = per.find((x) => x.key === md);
     if (!slot) continue;
     if (m.loc === "patio") slot.p += m.qty ?? 0;

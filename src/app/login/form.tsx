@@ -3,14 +3,14 @@
 import { useActionState, useState } from "react";
 import { login } from "../actions";
 
-export function LoginForm() {
+export function LoginForm({ barName, subtitle }: { barName: string; subtitle: string }) {
   const [error, action, pending] = useActionState(login, null);
   const [show, setShow] = useState(false);
 
   return (
     <form className="login" action={action}>
-      <h1>10X Bar</h1>
-      <div className="sub">Stock control — sign in to log moves.</div>
+      <h1>{barName}</h1>
+      <div className="sub">{subtitle} — sign in to log moves.</div>
 
       {error && <div className="err">{error}</div>}
 

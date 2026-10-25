@@ -8,4 +8,5 @@ export * from "./stocktake";
 export * from "./categories";
 export * from "./items";
 export * from "./users";
+export * from "./settings";
 export type { Result } from "./_shared";

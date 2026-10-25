@@ -240,35 +240,32 @@ export const needsReorder = (i: Item) =>
 /** "WHISKEY" -> "Whiskey", "manage" -> "Manage". */
 export const cap = (c: string) => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();
 
-/**
- * A bar's night runs past midnight. The shift opens 4-6 PM and closes by 2 AM; the
- * business day ends an hour later at 3 AM Central — any move 00:00-02:59 belongs to
- * the previous shift. The POS (Toast) is set to the same cutoff so both systems agree.
- *
- * ponytail: single global constants for now; they become per-location settings when
- * multi-bar scale arrives — same bizDayKey, just reading the location's hour and TZ.
- */
-export const BUSINESS_DAY_CUTOFF_HOUR = 3;
-export const BUSINESS_TZ = "America/Chicago";
+/** App-wide settings, read from the `settings` table. */
+export type Settings = {
+  bar_name: string;
+  app_subtitle: string;
+  business_day_cutoff_hour: number;
+  business_tz: string;
+};
+
+/** Defaults used when settings haven't been loaded from DB yet (e.g. in tests). */
+export const DEFAULT_SETTINGS: Settings = {
+  bar_name: "10X Bar",
+  app_subtitle: "STOCK CONTROL",
+  business_day_cutoff_hour: 3,
+  business_tz: "America/Chicago",
+};
 
 /**
- * The business-day key for a timestamp, as a Chicago-local "YYYY-MM-DD".
- *
- * Latest close is 2 AM; a 1-hour safety net puts the cutoff at 3 AM Central.
- * Any move 00:00-02:59 belongs to the shift that was still open.
+ * The business-day key for a timestamp, as a TZ-local "YYYY-MM-DD".
  *
  * Vercel's functions run in UTC — hence Intl + the explicit timezone, instead
  * of Date.setHours (which would silently use the server's local time).
- *
- * String keys are intentional: they survive JSON serialisation, sort as dates,
- * and compare with === without worrying about DST shifting the ms value by an
- * hour.
  */
-export function bizDayKey(ts: number): string {
-  const shifted = new Date(ts - BUSINESS_DAY_CUTOFF_HOUR * 3_600_000);
-  // en-CA formats as "YYYY-MM-DD" — handy because it's also the sort order.
+export function bizDayKey(ts: number, cutoffHour = DEFAULT_SETTINGS.business_day_cutoff_hour, tz = DEFAULT_SETTINGS.business_tz): string {
+  const shifted = new Date(ts - cutoffHour * 3_600_000);
   return new Intl.DateTimeFormat("en-CA", {
-    timeZone: BUSINESS_TZ,
+    timeZone: tz,
     year: "numeric", month: "2-digit", day: "2-digit",
   }).format(shifted);
 }
@@ -276,7 +273,6 @@ export function bizDayKey(ts: number): string {
 /** Shift a business-day key by N days (negative to go back). "YYYY-MM-DD" in, "YYYY-MM-DD" out. */
 export function addBusinessDays(key: string, days: number): string {
   const [y, m, d] = key.split("-").map(Number);
-  // Build at noon UTC so DST transitions in Chicago can't tip the date forward or back.
   const base = new Date(Date.UTC(y, m - 1, d, 12));
   base.setUTCDate(base.getUTCDate() + days);
   return `${base.getUTCFullYear()}-${String(base.getUTCMonth() + 1).padStart(2, "0")}-${String(base.getUTCDate()).padStart(2, "0")}`;

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { cap, type SessionUser } from "@/lib/model";
+import { cap, type SessionUser, type Settings, DEFAULT_SETTINGS } from "@/lib/model";
 import { logout, undoMove, type Result } from "../actions";
 
 export type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
@@ -64,6 +64,7 @@ type Ctx = {
 };
 
 const ActionCtx = createContext<Ctx | null>(null);
+const SettingsCtx = createContext<Settings>(DEFAULT_SETTINGS);
 
 export function useAction(): Ctx {
   const ctx = useContext(ActionCtx);
@@ -71,11 +72,15 @@ export function useAction(): Ctx {
   return ctx;
 }
 
+export function useSettings(): Settings {
+  return useContext(SettingsCtx);
+}
+
 /* ============================ shell ============================ */
 
 const noSubscribe = () => () => {};
 
-export function Shell({ user, children }: { user: SessionUser; children: React.ReactNode }) {
+export function Shell({ user, settings, children }: { user: SessionUser; settings: Settings; children: React.ReactNode }) {
   // Every page buckets moves into bar days and prints times in the viewer's timezone.
   // The server renders in its own zone (UTC on Vercel), so the page body is held back
   // until after hydration - otherwise the first client render disagrees with the server
@@ -137,14 +142,15 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
 
   const brand = (
     <div className="brand">
-      <span className="mark">10<b>X</b> Bar</span>
-      <span className="sub">Stock control</span>
+      <span className="mark">{settings.bar_name}</span>
+      <span className="sub">{settings.app_subtitle}</span>
     </div>
   );
 
   return (
+    <SettingsCtx.Provider value={settings}>
     <ActionCtx.Provider value={{ pending, run, say }}>
-      <h2 className="sr-only">10X Bar stock control</h2>
+      <h2 className="sr-only">{settings.bar_name} {settings.app_subtitle.toLowerCase()}</h2>
 
       <div className={`app${tabs.length ? "" : " solo"}`}>
         {tabs.length > 0 && (
@@ -189,5 +195,6 @@ export function Shell({ user, children }: { user: SessionUser; children: React.R
         </div>
       )}
     </ActionCtx.Provider>
+    </SettingsCtx.Provider>
   );
 }

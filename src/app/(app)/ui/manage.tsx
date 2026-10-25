@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CAT_MAX, cap, fmt, fmtQty, normCat, type Cat, type Category, type Item, type SessionUser, type Staff } from "@/lib/model";
-import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, resetPassword, setCaseSize, setReorderIgnore, setReorderLevel, setUserActive, type Result } from "../../actions";
-import { useAction } from "../shell";
+import { CAT_MAX, cap, fmt, fmtQty, normCat, type Cat, type Category, type Item, type SessionUser, type Settings, type Staff } from "@/lib/model";
+import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, resetPassword, setCaseSize, setReorderIgnore, setReorderLevel, setUserActive, updateSetting, type Result } from "../../actions";
+import { useAction, useSettings } from "../shell";
 import { SortDir, catColor, rankIn, sortRows, useColumnSort, useEscapeClose, usePopoverClose } from "./shared";
 
 type ManageSortKey = "name" | "cat" | "store" | "patio" | "back" | "rl";
@@ -226,6 +226,8 @@ export function Manage({
           period before.
         </div>
       </div>
+
+      <SettingsCard />
 
       <CategoriesCard cats={cats} run={run} pending={pending} />
 
@@ -623,5 +625,55 @@ function AllBottlesView({ items, cats, run, onClose }: {
       {!shown.length && <div className="empty" style={{ padding: 20 }}>No bottles match.</div>}
       {shown.map((i) => <BottleRow key={i.id} i={i} cats={cats} run={run} />)}
     </>
+  );
+}
+
+const SETTINGS_FIELDS: { key: string; label: string; hint: string; type?: string }[] = [
+  { key: "bar_name", label: "Bar name", hint: "Shown on the login page, nav and reports" },
+  { key: "app_subtitle", label: "Subtitle", hint: "Below the bar name (e.g. STOCK CONTROL)" },
+  { key: "business_day_cutoff_hour", label: "Business day cutoff (hour)", hint: "0-23 — moves before this hour count as the previous day", type: "number" },
+  { key: "business_tz", label: "Timezone", hint: "IANA timezone for the cutoff (e.g. America/Chicago)" },
+];
+
+function SettingsCard() {
+  const settings = useSettings();
+  const { pending, run } = useAction();
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+
+  const val = (key: string) => drafts[key] ?? String(settings[key as keyof Settings] ?? "");
+  const dirty = (key: string) => val(key) !== String(settings[key as keyof Settings] ?? "");
+
+  function save(key: string) {
+    const v = val(key).trim();
+    if (!v || !dirty(key)) return;
+    run(() => updateSetting(key, v), `${key} updated`, () =>
+      setDrafts((d) => { const next = { ...d }; delete next[key]; return next; }));
+  }
+
+  return (
+    <div className="card">
+      <div className="ch"><h3>Settings</h3></div>
+      <div className="frm">
+        {SETTINGS_FIELDS.map((f) => (
+          <div className="fld" key={f.key}>
+            <label>{f.label}</label>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                type={f.type ?? "text"}
+                value={val(f.key)}
+                onChange={(e) => setDrafts((d) => ({ ...d, [f.key]: e.target.value }))}
+                onBlur={() => { if (dirty(f.key)) save(f.key); }}
+                onKeyDown={(e) => { if (e.key === "Enter") save(f.key); }}
+                style={{ flex: 1 }}
+              />
+              {dirty(f.key) && (
+                <button className="btn sm" disabled={pending} onClick={() => save(f.key)}>Save</button>
+              )}
+            </div>
+            <div className="hint">{f.hint}</div>
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }

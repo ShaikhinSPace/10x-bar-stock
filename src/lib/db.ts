@@ -1,6 +1,6 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
-import type { Category, Delivery, Item, Move } from "./model";
+import { DEFAULT_SETTINGS, type Category, type Delivery, type Item, type Move, type Settings } from "./model";
 
 // Thrown at module load, so a missing value fails the build rather than every request.
 if (!process.env.DATABASE_URL) {
@@ -24,6 +24,22 @@ const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 /** numeric[] arrives from pg as an array of strings. */
 const nums = (v: unknown) => (Array.isArray(v) ? v.map(Number).filter(Number.isFinite) : []);
+
+export async function getSettings(): Promise<Settings> {
+  const rows = await sql`select key, value from settings`;
+  const map = Object.fromEntries(rows.map((r) => [r.key, r.value]));
+  return {
+    bar_name: map.bar_name ?? DEFAULT_SETTINGS.bar_name,
+    app_subtitle: map.app_subtitle ?? DEFAULT_SETTINGS.app_subtitle,
+    business_day_cutoff_hour: Number(map.business_day_cutoff_hour ?? DEFAULT_SETTINGS.business_day_cutoff_hour),
+    business_tz: map.business_tz ?? DEFAULT_SETTINGS.business_tz,
+  };
+}
+
+export async function setSetting(key: string, value: string): Promise<void> {
+  await sql`insert into settings (key, value) values (${key}, ${value})
+            on conflict (key) do update set value = excluded.value`;
+}
 
 export async function getItems(): Promise<Item[]> {
   const rows = await sql`

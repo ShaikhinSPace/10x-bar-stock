@@ -1,5 +1,5 @@
 import "server-only";
-import { sql } from "./db";
+import { getSettings, sql } from "./db";
 import { LOC_LABEL, cap, fmt, fmtQty, type Cat, type Loc } from "./model";
 import type { PdfKpi, PdfReport, PdfSection } from "./pdf";
 
@@ -465,7 +465,7 @@ export async function buildReport(period: Period, userName: string, now = new Da
   const prevRange = `${md(prev.from)} - ${md(cur.from)}`;
 
   return {
-    title: "10X Bar - Stock Report",
+    title: `${(await getSettings()).bar_name} - Stock Report`,
     subtitle: `Last ${LABEL[period]} (${range})   vs   the ${LABEL[period]} before (${prevRange})`,
     meta: `Generated ${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}`
       + ` at ${now.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })} by ${userName}`
