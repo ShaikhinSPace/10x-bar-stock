@@ -198,13 +198,24 @@ function Sheet({
   // Store count. Case-sized bottles count IN CASES — "1 case" not "24 bottles" — because
   // that's how the storeroom is actually walked. The server still stores bottles, so a
   // typed value is multiplied by case_size before saving.
+  // Cases + loose bottles. The storeroom often holds broken cases (one opened
+  // and tapped from), so a single "cases" input would force a round-off every
+  // time. Split: cases are integer-stepped; loose is an integer 0..case_size-1
+  // typically (not enforced — a stray extra bottle is valid).
   const storeIsCases = item.case_size > 1;
   const [storeCountStr, setStoreCountStr] = useState<string>(() =>
-    storeIsCases ? fmt(item.store / item.case_size) : fmt(item.store));
+    storeIsCases ? fmt(Math.floor(item.store / item.case_size)) : fmt(item.store));
+  const [storeLooseStr, setStoreLooseStr] = useState<string>(() =>
+    storeIsCases ? fmt(item.store % item.case_size) : "0");
   const storeCountRaw = Number(storeCountStr);
-  const storeCountValid = Number.isInteger(storeCountRaw) && storeCountRaw >= 0;
-  // What the input value translates to in bottles — what the server sees.
-  const storeCountBottles = storeCountValid ? storeCountRaw * (storeIsCases ? item.case_size : 1) : 0;
+  const storeLooseRaw = Number(storeLooseStr);
+  const storeCountValid = Number.isInteger(storeCountRaw) && storeCountRaw >= 0
+    && (!storeIsCases || (Number.isInteger(storeLooseRaw) && storeLooseRaw >= 0));
+  // What the inputs translate to in bottles — what the server sees. Loose only
+  // contributes for case-sized items; a plain bottle count ignores it.
+  const storeCountBottles = storeCountValid
+    ? storeCountRaw * (storeIsCases ? item.case_size : 1) + (storeIsCases ? storeLooseRaw : 0)
+    : 0;
   const storeDelta = storeCountValid ? Math.round((storeCountBottles - item.store) * 100) / 100 : 0;
 
   const presets = item.cat === "BEER" ? [1, 6, 12, 24] : [1, 2, 3, 6];
@@ -412,7 +423,10 @@ function Sheet({
               <button key={k} data-t={k} className={`pick${countLoc === k ? " sel" : ""}`}
                 onClick={() => {
                   setCountLoc(k);
-                  if (k === "store") setStoreCountStr(storeIsCases ? fmt(item.store / item.case_size) : fmt(item.store));
+                  if (k === "store") {
+                    setStoreCountStr(storeIsCases ? fmt(Math.floor(item.store / item.case_size)) : fmt(item.store));
+                    setStoreLooseStr(storeIsCases ? fmt(item.store % item.case_size) : "0");
+                  }
                   else { setBottles(seedBottles(item, k)); setBarCountStr(fmt(item[k])); }
                 }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
@@ -422,33 +436,53 @@ function Sheet({
 
           {countLoc === "store" ? (
             <>
-              <div className="lbl">{storeIsCases ? "How many cases?" : "Counted amount"}</div>
-              <div className="qsel">
-                <button className="step" aria-label="One fewer"
-                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCountRaw : 0) - 1)))}>−</button>
-                <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
-                  value={storeCountStr} onChange={(e) => setStoreCountStr(e.target.value)} />
-                <button className="step" aria-label="One more"
-                  onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCountRaw : 0) + 1)))}>+</button>
-              </div>
+              <div className="lbl">{storeIsCases ? "How many cases + loose?" : "Counted amount"}</div>
+              {storeIsCases ? (
+                <div className="qsel" style={{ gap: 10 }}>
+                  <button className="step" aria-label="One fewer case"
+                    onClick={() => setStoreCountStr(String(Math.max(0, (Number.isInteger(storeCountRaw) ? storeCountRaw : 0) - 1)))}>−</button>
+                  <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
+                    aria-label="Cases"
+                    value={storeCountStr} onChange={(e) => setStoreCountStr(e.target.value)} />
+                  <button className="step" aria-label="One more case"
+                    onClick={() => setStoreCountStr(String(Math.max(0, (Number.isInteger(storeCountRaw) ? storeCountRaw : 0) + 1)))}>+</button>
+                  <span style={{ color: "var(--txt-3)", fontSize: 14, padding: "0 4px" }}>+</span>
+                  <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
+                    aria-label="Loose bottles"
+                    style={{ maxWidth: 90 }}
+                    value={storeLooseStr} onChange={(e) => setStoreLooseStr(e.target.value)} />
+                  <span style={{ color: "var(--txt-3)", fontSize: 13 }}>loose</span>
+                </div>
+              ) : (
+                <div className="qsel">
+                  <button className="step" aria-label="One fewer"
+                    onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCountRaw : 0) - 1)))}>−</button>
+                  <input className="qnum" type="number" inputMode="numeric" min="0" step="1"
+                    value={storeCountStr} onChange={(e) => setStoreCountStr(e.target.value)} />
+                  <button className="step" aria-label="One more"
+                    onClick={() => setStoreCountStr(String(Math.max(0, (storeCountValid ? storeCountRaw : 0) + 1)))}>+</button>
+                </div>
+              )}
               {(() => {
-                // Nothing in the UI should talk in bottles when the item lives in cases.
-                const wasUnits = storeIsCases ? item.store / item.case_size : item.store;
-                const newUnits = storeCountRaw;
-                const deltaUnits = storeCountValid ? newUnits - wasUnits : 0;
-                const unit = storeIsCases ? "case" : "bottle";
-                const pluralise = (n: number) => `${fmt(n)} ${unit}${Math.abs(n) === 1 ? "" : "s"}`;
+                if (!storeCountValid) return <div className="cnote">Enter a whole number</div>;
+                if (storeIsCases) {
+                  const totalBottles = storeCountBottles;
+                  const casesTxt = `${fmt(storeCountRaw)} case${storeCountRaw === 1 ? "" : "s"}`;
+                  const looseTxt = storeLooseRaw > 0 ? ` + ${fmt(storeLooseRaw)} loose` : "";
+                  const deltaTxt = storeDelta === 0 ? `no change` : `${storeDelta > 0 ? "+" : ""}${fmt(storeDelta)} bottles`;
+                  return <div className="cnote">{casesTxt}{looseTxt} = {fmt(totalBottles)} bottles · {deltaTxt}</div>;
+                }
                 return (
                   <div className="cnote">
-                    {!storeCountValid ? "Enter a whole number"
-                      : deltaUnits === 0 ? `No change — store stays at ${pluralise(wasUnits)}`
-                      : `Store: ${pluralise(wasUnits)} → ${pluralise(newUnits)} (${deltaUnits > 0 ? "+" : ""}${fmt(deltaUnits)})`}
+                    {storeDelta === 0
+                      ? `No change — store stays at ${fmt(item.store)}`
+                      : `Store: ${fmt(item.store)} → ${fmt(storeCountRaw)} (${storeDelta > 0 ? "+" : ""}${fmt(storeDelta)})`}
                   </div>
                 );
               })()}
               <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
                 {storeIsCases
-                  ? `Count whole cases (${item.case_size} bottles each). If the number is lower, prefer logging a Waste for the missing cases — a count overwrites the running total and hides where the loss came from.`
+                  ? `A case is ${item.case_size} bottles. Count whole cases, then any loose bottles from an opened case separately. If the number is lower, prefer logging a Waste for the missing bottles — a count overwrites the running total and hides where the loss came from.`
                   : "The storeroom counts whole sealed bottles. If the counted number is lower, prefer logging a Waste for the missing bottles — a count overwrites the running total and hides where the loss came from."}
               </div>
               <button className="commit amber" disabled={pending || !storeCountValid || storeDelta === 0}
