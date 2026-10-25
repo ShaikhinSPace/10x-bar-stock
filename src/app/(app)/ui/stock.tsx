@@ -515,7 +515,11 @@ export function Stocktake({
           <span className="s-n">Bottle</span>
           <span className="s-e">Expected</span>
           <span className="s-a">Counted</span>
-          <span className="s-v">Variance</span>
+          {/* Bars: usage since the previous count (expected = what we think was
+              on the bar, counted = what's there now, the gap is what got poured).
+              Store: a true variance (store only changes through logged moves, so
+              any gap is unlogged). Different column name, different colouring. */}
+          <span className="s-v">{loc === "store" ? "Variance" : "Used since last count"}</span>
         </div>
         {rows.map((r, idx) => {
           const raw = counts[r.key] ?? "";
@@ -529,8 +533,11 @@ export function Stocktake({
           const expectedTxt = loc === "store"
             ? fmtQty(r.item.cat, r.expected, r.item.case_size)
             : r.item.case_size > 1 ? fmt(r.expected) : r.expected.toFixed(2);
+          // Only flag a variance on the STORE step. On bars the gap is usage,
+          // not an error — colouring it green/red would mislead.
+          const flagVariance = loc === "store" && ok && diff !== 0;
           return (
-            <div className={`stk-row${ok && diff !== 0 ? " has-var" : ""}`} key={r.key}>
+            <div className={`stk-row${flagVariance ? " has-var" : ""}`} key={r.key}>
               <span className="s-n">
                 <span className="nm">{label}</span>
                 <span className="ct">{cap(r.item.cat)}</span>
@@ -545,7 +552,9 @@ export function Stocktake({
                   onChange={(e) => setCounts((c) => ({ ...c, [r.key]: e.target.value }))}
                 />
               </span>
-              <span className={`s-v${diff === null ? "" : diff > 0 ? " up" : diff < 0 ? " down" : " same"}`}>
+              {/* Store gets red/green on the gap (true variance). Bar cells stay
+                  neutral — the gap there is usage, not an error. */}
+              <span className={`s-v${diff === null ? "" : diff === 0 ? " same" : loc === "store" ? (diff > 0 ? " up" : " down") : ""}`}>
                 {diff === null ? "" : diff === 0 ? "✓" : `${diff > 0 ? "+" : ""}${fmt(diff)}`}
               </span>
             </div>
