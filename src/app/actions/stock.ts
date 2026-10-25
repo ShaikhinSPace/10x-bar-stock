@@ -223,13 +223,23 @@ export async function countStore(itemId: number, value: number): Promise<Result>
   });
 }
 
-/** Log a wasted, broken, or spilled bottle. Owner-only. */
+/**
+ * Log a wasted, broken, or spilled bottle.
+ *
+ * Staff can log waste on the BARS only — a spill is a shift reality and if
+ * barbacks can't record it, it comes out as unexplained usage against the
+ * POS and looks the same as loss. Store waste stays owner-only (storeroom
+ * loss is a leakage signal that needs the owner's eyes on it).
+ */
 export async function logWaste(
   itemId: number, qty: number, loc: Loc, reason: string
 ): Promise<Result> {
   return attempt(async () => {
-    const u = await requireOwner();
+    const u = await requireUser();
     if (!isLoc(loc)) throw new Error("Unknown location");
+    if (loc === "store" && u.role !== "owner") {
+      throw new Error("Only the owner can log waste in the storeroom");
+    }
     const q = loc === "store" ? whole(qty, "Waste quantity") : partial(qty, "Waste quantity");
     if (q <= 0) throw new Error("Quantity must be greater than zero");
     const r = reason.trim() || "Spill / Breakage";

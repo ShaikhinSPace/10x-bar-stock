@@ -234,8 +234,8 @@ function Sheet({
         })}
       </div>
 
-      {/* Staff do Give / Receive / Transfer only — Count and Record wastage belong to
-          the owner. Hiding the buttons is cosmetic; the server also refuses the actions. */}
+      {/* Staff do Give / Receive / Transfer / Record wastage (bars only) — Count
+          stays owner-only. The server enforces the storeroom-waste gate too. */}
       <div className="actseg">
         {((user.role === "owner" ? ["give", "receive", "count"] : ["give", "receive"]) as SheetAct[]).map((a) => (
           <button key={a} className={act === a ? "on" : ""} onClick={() => setAct(a)}>
@@ -247,11 +247,9 @@ function Sheet({
         <button className={`actmore-btn${act === "transfer" ? " on" : ""}`} onClick={() => setAct("transfer")}>
           Transfer stock
         </button>
-        {user.role === "owner" && (
-          <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
-            Record wastage
-          </button>
-        )}
+        <button className={`actmore-btn${act === "waste" ? " on danger" : ""}`} onClick={() => setAct("waste")}>
+          Record wastage
+        </button>
       </div>
 
       {act === "give" && (
@@ -360,7 +358,9 @@ function Sheet({
         <div>
           <div className="lbl">Wasted from</div>
           <div className="pickrow">
-            {LOCS.map((k) => (
+            {/* Staff can log bar waste only — storeroom loss is an owner call.
+                The server rejects loc=store from a staff cookie regardless. */}
+            {(user.role === "owner" ? LOCS : LOCS.filter((k) => k !== "store")).map((k) => (
               <button key={k} data-t={k} className={`pick${wasteLoc === k ? " sel" : ""}`}
                 onClick={() => { setWasteLoc(k); setWasteQtyStr("1"); }}>
                 <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
