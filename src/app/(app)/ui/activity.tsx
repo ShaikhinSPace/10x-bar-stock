@@ -179,10 +179,9 @@ function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose
   const isCount = type === "count";
   const needsLoc = type === "give" || type === "receive"; // count is the storeroom only
 
-  const dateOf = (ms: number) => {
-    const d = new Date(bizDayKey(ms));
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  };
+  // bizDayKey already returns "YYYY-MM-DD" in Chicago TZ — exactly the shape
+  // the <input type="date"> expects.
+  const dateOf = (ms: number) => bizDayKey(ms);
   const [dateStr, setDateStr] = useState(() => dateOf(now));
   const todayStr = dateOf(now);
   const dateRef = useRef<HTMLInputElement>(null);

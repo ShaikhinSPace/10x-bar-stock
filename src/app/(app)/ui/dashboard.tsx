@@ -317,11 +317,13 @@ function CategoryCard({ items, cats }: { items: Item[]; cats: Category[] }) {
 }
 
 function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
-  const per = last7(now).map((d) => ({ d, p: 0, b: 0, u: 0 }));
+  // Carry the business-day key alongside the date — matching on string keys
+  // (bizDayKey now returns "YYYY-MM-DD") avoids any UTC/local ms drift.
+  const per = last7(now).map((d) => ({ d, key: bizDayKey(d.getTime()), p: 0, b: 0, u: 0 }));
   for (const m of moves) {
     if (m.type !== "give") continue;
     const md = bizDayKey(new Date(m.ts).getTime());
-    const slot = per.find((x) => x.d.getTime() === md);
+    const slot = per.find((x) => x.key === md);
     if (!slot) continue;
     if (m.loc === "patio") slot.p += m.qty ?? 0;
     else if (m.loc === "back") slot.b += m.qty ?? 0;
