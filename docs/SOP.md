@@ -13,6 +13,10 @@ spreadsheet with per-location tracking (Store · Patio Bar · Back Bar), an
 append-only move log, and an opening count each shift; the difference
 between consecutive counts is what each bar used.
 
+**Business day ends at 3 AM Central.** Any move 00:00-02:59 belongs to
+the shift that was still open. Toast is set to the same closeout so both
+systems agree on what "Friday" is.
+
 The point: catching leakage between what leaves the storeroom and what each
 bar actually has. Everything is per-location rather than one combined total.
 
@@ -70,12 +74,21 @@ user POSTing directly to a count/waste/delivery server action is refused with
    a chained Count sweep: Patio Bar → Back Bar → Store, with a "1 of 3"
    progress indicator at the top of each step.
    - For each step, walk the list and type what you count. The Expected
-     column shows what the system thinks is there; the Variance column
-     turns green or red as you type.
+     column shows what the system thinks is there; the fourth column
+     differs by location:
+     - **Bars** show **Used since last count** (neutral grey) — the gap
+       is what got poured, not an error.
+     - **Store** shows **Variance** (green/red) — the storeroom only
+       changes through logged entries, so any gap is unlogged and worth
+       looking at.
    - Partial bottles on a bar: enter the fill level per open bottle
-     (0.25, 0.5, 0.75, 1.00). Beer bars show one integer input per brand.
-     Store counts in cases for case-sized items (type `2` for two cases;
-     the system stores it as 48 bottles).
+     (0.25, 0.5, 0.75, 1.00). An empty bottle is `0` — it logs as an
+     Emptied event in Activity. Beer bars show one integer input per
+     brand (no partials — beer bottles are either there or not).
+   - **Store counts beer as cases + loose bottles.** The row has two
+     inputs: cases on the stepper, and a loose field beside it (type
+     `2` and `7` for two cases and seven loose). The system stores it as
+     `2 × 24 + 7 = 55` bottles.
    - At the bottom: `Save & continue (N)` saves variances and advances;
      `No changes — continue` advances without saving if everything matched.
    - **Cancel** at any step exits the sweep. Steps already saved stay
@@ -84,6 +97,25 @@ user POSTing directly to a count/waste/delivery server action is refused with
    gives are logged either way — but it keeps the numbers easier to read.
 5. **Check the Reorder table** on the Dashboard — anything flagged OUT or
    LOW is a candidate for the next supplier order.
+
+### When a number is off
+After the sweep, scan the saved steps for anything that looked wrong.
+A rule of thumb (adjust as you learn what's normal here):
+- **Store:** any variance of 1 bottle (or 1 case for beer) or more.
+- **Bars vs Toast:** used is noticeably higher than Toast sold for that
+  shift (fill in your own threshold after a few weeks of data).
+
+**What to do, in order:**
+1. **Recount that bottle.** Most variances are a miscount.
+2. **Check that bottle's Activity.** Look for a give, transfer, or
+   receive that looks wrong or is missing.
+3. **Ask whoever was on.** Usually it's "oh, I grabbed one and forgot to
+   log it." That's fine. Log it with **Add entry** in Activity, picking
+   the time it actually happened — the system won't double-dip against
+   today's count.
+4. **If it's still unexplained,** leave it. It shows in Reports under
+   Store corrections. Patterns matter more than one bad day: the same
+   bottle, the same shift, or the same person, over and over.
 
 ### During the shift (barback)
 Primary surface: the Stock tab.
@@ -98,6 +130,11 @@ Primary surface: the Stock tab.
   are owner-only via the Delivery tab.
 - **Transfer stock** (bar ↔ store, bar ↔ bar): tap a bottle → **Transfer
   stock** → pick from/to → pick quantity → **Transfer**.
+- **Record wastage (bars only)**: tap a bottle → **Record wastage** →
+  Patio or Back → pick quantity → reason → confirm. Barbacks log their
+  own spills and breakage when it happens. Unlogged spills show up as
+  unexplained usage against Toast and look the same as loss, so log
+  them. Storeroom waste stays owner-only.
 - **Undo**: on each bottle's sheet, "Recent on this bottle" lists the last
   few moves with an **Undo** button on your own entries.
 
@@ -120,14 +157,11 @@ Primary surface: the Stock tab.
 Past deliveries are listed below, grouped by day. Expand one to see its
 lines; **Edit delivery** (owner).
 
-### Recording waste (owner)
-Tap a bottle → **Record wastage** → pick location → pick quantity → pick a
-reason (Spill, Breakage, etc.) → confirm. Waste subtracts from stock and
-logs a `waste` move distinct from a count drop.
-
-> Note: `wastage` is a tracked feature but has gone largely unused in
-> practice. A bottle counted down at a bar is "poured", not "wasted" —
-> wastage is reserved for breakage/spills specifically.
+### Recording waste (owner, storeroom)
+For storeroom breakage: tap a bottle → **Record wastage** → Store → pick
+quantity → reason → confirm. Bar waste is logged by whoever was on shift
+(see barback section). Waste is a distinct `waste` move so Reports can
+tell breakage from pours.
 
 ---
 
@@ -156,8 +190,12 @@ All moves · Give · Receive · Transfer · Waste · Count · Emptied. An
 emptied-out bar bottle (a count that lands at 0) is tagged distinctly in
 red with a ∅ icon. "Copy log (CSV)" exports every move.
 
-Owner-only: "Add entry" to log a move that wasn't captured in real time
-(a historical correction).
+Owner-only: **Add entry** to log a move the barback forgot to put in.
+Pick what happened (give / receive / count), when it happened (any day in
+the past), the bottle and quantity. If a count has already run on that
+bottle *after* the time you pick, Add entry writes the row for history —
+so Reports and the Toast tally come out right — without touching current
+stock a second time. The physical count is already the truth.
 
 ### Manage (owner only)
 - **Add a bottle**: name, category, in-store opening count, reorder level,
@@ -220,7 +258,41 @@ account hitting it directly gets a 403 regardless of UI gating.
 
 ---
 
-## 7. Setup (first time)
+## 7. Tallying against Toast
+
+The app tells you how much each bar *used*. Toast tells you how much it
+*sold*. The gap is the real variance — leakage, pour overs, or missed
+rings.
+
+**Business day ends at 3 AM Central** in both the app and Toast. Set
+Toast's closeout hour to 3 AM so both systems agree on what "Friday" is.
+
+**Window:** each opening count covers the previous open shift.
+
+| Count at | Covers |
+|---|---|
+| Thu 4 PM | Wed shift |
+| Fri 4 PM | Thu shift |
+| Sat 4 PM | Fri shift |
+| Sun 4 PM | Sat shift |
+| Wed 6 PM | Sun shift (Mon/Tue closed — nothing else should have moved) |
+
+The Wednesday count is the cleanest leakage check of the week: any usage
+beyond Sunday's Toast sales happened while the bar was closed.
+
+**Units:** convert Toast usage to bottles before comparing
+(`oz sold ÷ bottle size in oz`).
+
+**What to look at:** bottles where *used* is noticeably higher than
+*sold*. Check that bottle's Activity first — a missed give or transfer
+is the usual cause — before treating it as loss.
+
+- Toast report pulled: _____ (fill in).
+- Threshold for "noticeably higher": _____ (fill in after a few weeks).
+
+---
+
+## 8. Setup (first time)
 
 Local development:
 ```bash
@@ -233,9 +305,11 @@ npm run dev
 
 `setup.mjs` is idempotent — re-running it won't duplicate items or users.
 
-Add staff from Manage once an owner exists. To reset a forgotten password:
-disable the old account in Manage, then run `scripts/setup.mjs` again with
-new credentials to create a replacement.
+Add staff from Manage once an owner exists. To reset a forgotten
+password: **Manage → Staff → Reset password** on their row, type the new
+one. The user's existing sessions are invalidated — they re-sign in with
+the new password next time they open the app. The same row is kept, so
+their history stays intact.
 
 ### Schema migrations
 When new columns are added to the schema (e.g. `items.case_size`,
@@ -249,19 +323,18 @@ safe to re-run; the `--schema-only` flag skips re-seeding items.
 
 ---
 
-## 8. Known gaps / design decisions
+## 9. Known gaps / design decisions
 
 - **Mixers raise no reorder alerts** — juices, syrups, salt and Tajin are
   consumables, not leakage risks. They still show OUT in the stock list
   but don't appear in dashboard alerts. Change `NO_REORDER_ALERTS` in
   `src/lib/model.ts` to undo this.
-- **Reorder levels are estimates** — the original workbook left this blank
-  for every item. Seeded at 24 for beer, 1 for everything else. Edit per
-  item in Manage.
+- **Reorder levels want a yearly tuning pass.** Seeded at 24 for beer,
+  1 for everything else. After 2–3 weeks of real counts, walk Manage →
+  All bottles and set each to roughly one week's usage plus a small
+  buffer. Record the date here: last tuned on _____.
 - **No "reset all"** — intentionally. Archive bottles in Manage; the
   activity log keeps every history row.
-- **Wastage is tracked but under-used** in practice. Keep logging real
-  breakage; everything else is "poured" (captured by count drops).
 - **Historical bar numbers were unreliable** — the original workbook had
   double-counted rows in Patio Bar vs Back Bar. Bars started at zero in
   this app; the first few real counts are the truth.
@@ -271,7 +344,7 @@ safe to re-run; the `--schema-only` flag skips re-seeding items.
 
 ---
 
-## 9. Troubleshooting
+## 10. Troubleshooting
 
 - **"Enter the invoice number for this delivery"** — the Book button stays
   disabled until an invoice number is typed.
