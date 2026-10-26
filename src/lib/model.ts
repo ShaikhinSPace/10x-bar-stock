@@ -156,6 +156,8 @@ export function undoableMoveIds(moves: Move[]): Set<number> {
 export type Delivery = {
   batch: string; invoice: string; supplier: string | null;
   ts: string; user_name: string; user_id: number | null; bottles: number;
+  /** "YYYY-MM-DD" the drop arrived; null on deliveries booked before this was recorded. */
+  delivery_date: string | null;
   /** Sum of the per-line costs; null when no line carried one. */
   cost: number | null;
   /** false when this delivery is paperwork only — all of its receive moves share the flag. */

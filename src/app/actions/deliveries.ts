@@ -8,6 +8,16 @@ import { attempt, whole, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
 
+/** A "YYYY-MM-DD" that is a real calendar day, or null when none was given. */
+function parseDay(v: unknown): string | null {
+  if (v == null || v === "") return null;
+  if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v) || Number.isNaN(Date.parse(v))
+      || new Date(v).toISOString().slice(0, 10) !== v) {
+    throw new Error("That delivery date isn't valid");
+  }
+  return v;
+}
+
 /**
  * Book a whole delivery in one go — deliveries arrive as one drop with many lines,
  * and tapping Receive on thirty bottles individually is how counts get skipped.
@@ -23,7 +33,7 @@ import { attempt, whole, type Result } from "./_shared";
  * aren't double-counted.
  */
 export async function receiveDelivery(
-  lines: DeliveryLine[], invoice: string, supplier: string, affectsStock = true,
+  lines: DeliveryLine[], invoice: string, supplier: string, affectsStock = true, deliveryDate?: string,
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireOwner();
@@ -52,6 +62,8 @@ export async function receiveDelivery(
     const inv = invoice.trim();
     if (!inv) throw new Error("Enter the invoice number for this delivery");
     if (inv.length > 60) throw new Error("That invoice number is too long");
+
+    const dDate = parseDay(deliveryDate);
 
     const ids = [...merged.keys()];
     const qtys = [...merged.values()].map((v) => v.qty);
@@ -89,9 +101,9 @@ export async function receiveDelivery(
         )
         insert into moves
           (type, item_id, item_name, cat, qty, loc, user_id, user_name,
-           batch, invoice, supplier, affects_stock, cost, line_case_size)
+           batch, invoice, supplier, affects_stock, cost, line_case_size, delivery_date)
         select 'receive', upd.id, upd.name, upd.cat, upd.qty, 'store',
-               ${u.id}, ${u.name}, ${batch}, ${inv}, ${sup}, ${affects}, upd.cost, upd.case_size
+               ${u.id}, ${u.name}, ${batch}, ${inv}, ${sup}, ${affects}, upd.cost, upd.case_size, ${dDate}::date
         from upd
         returning id`,
     ]);
@@ -124,7 +136,7 @@ export async function receiveDelivery(
  * owner's typing. Undo is still the way to remove a delivery entirely.
  */
 export async function editDelivery(
-  batch: string, lines: DeliveryLine[], invoice: string, supplier: string,
+  batch: string, lines: DeliveryLine[], invoice: string, supplier: string, deliveryDate?: string,
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
@@ -179,6 +191,7 @@ export async function editDelivery(
     // against a real database — see the module for why it is all-or-nothing.
     const rows = await applyDeliveryEdit(sql, {
       batch, ids, qtys, costs, caseSizes, invoice: inv, supplier: sup, affectsStock: affects,
+      deliveryDate: parseDay(deliveryDate),
     });
 
     if (rows.length !== ids.length) {

@@ -144,6 +144,10 @@ create table if not exists moves (
 alter table moves add column if not exists batch    text;
 alter table moves add column if not exists invoice  text;
 alter table moves add column if not exists supplier text;
+-- The day the drop physically arrived, as the owner entered it. Distinct from ts (when it was
+-- booked): a delivery is often booked a day or two late. Null on older deliveries and on every
+-- non-delivery move; readers fall back to the business day of ts.
+alter table moves add column if not exists delivery_date date;
 alter table moves add column if not exists notes    text; -- waste reasons, comments
 alter table moves add column if not exists to_loc   text; -- transfer destination
 
