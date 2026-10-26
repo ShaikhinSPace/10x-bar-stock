@@ -3,7 +3,7 @@
 import { refresh } from "next/cache";
 import { sql, type Loc } from "@/lib/db";
 import { requireOwner } from "@/lib/auth";
-import { attempt, partial, isLoc, type Result } from "./_shared";
+import { attempt, partial, isLoc, knownLocs, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
 
@@ -25,7 +25,8 @@ export async function submitStocktake(
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireOwner();
-    if (!isLoc(loc)) throw new Error("Unknown location");
+    const locs = await knownLocs();
+    if (!isLoc(loc, locs)) throw new Error("Unknown location");
     if (!Array.isArray(lines) || !lines.length) throw new Error("Nothing counted yet");
     if (lines.length > 1000) throw new Error("That's too many lines for one count");
 

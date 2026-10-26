@@ -1,16 +1,17 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { LOC_LABEL, LOC_SHORT, bizDayKey, cap, fmtQty, undoableMoveIds, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { bizDayKey, cap, fmtQty, undoableMoveIds, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { addEntry, undoMove } from "../../actions";
 import { useAction, useSettings } from "../shell";
-import { dayKey, timeStr } from "./shared";
+import { dayKey, timeStr, useLocMaps } from "./shared";
 
 export function Activity({
   moves, items, user, now,
 }: {
   moves: Move[]; items: Item[]; user: SessionUser; now: number;
 }) {
+  const { label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
   const { run, say } = useAction();
   const settings = useSettings();
   const onUndo = (id: number) => run(() => undoMove(id), "Entry undone");
@@ -170,6 +171,7 @@ export function Activity({
  * applied now — a correction is a real move, undoable from the log like any other.
  */
 function AddEntry({ items, now, onClose }: { items: Item[]; now: number; onClose: () => void }) {
+  const { short: LOC_SHORT } = useLocMaps();
   const { pending, run } = useAction();
   const [type, setType] = useState<"give" | "receive" | "count">("give");
   const [itemId, setItemId] = useState<number | "">("");

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { cap, type SessionUser, type Settings, DEFAULT_SETTINGS } from "@/lib/model";
+import { cap, type Location, type SessionUser, type Settings, DEFAULT_SETTINGS } from "@/lib/model";
 import { logout, undoMove, type Result } from "../actions";
 
 export type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
@@ -66,6 +66,7 @@ type Ctx = {
 const ActionCtx = createContext<Ctx | null>(null);
 const SettingsCtx = createContext<Settings>(DEFAULT_SETTINGS);
 const WastageReasonsCtx = createContext<string[]>([]);
+const LocationsCtx = createContext<Location[]>([]);
 
 export function useAction(): Ctx {
   const ctx = useContext(ActionCtx);
@@ -81,11 +82,15 @@ export function useWastageReasons(): string[] {
   return useContext(WastageReasonsCtx);
 }
 
+export function useLocations(): Location[] {
+  return useContext(LocationsCtx);
+}
+
 /* ============================ shell ============================ */
 
 const noSubscribe = () => () => {};
 
-export function Shell({ user, settings, wastageReasons, children }: { user: SessionUser; settings: Settings; wastageReasons: string[]; children: React.ReactNode }) {
+export function Shell({ user, settings, wastageReasons, locations, children }: { user: SessionUser; settings: Settings; wastageReasons: string[]; locations: Location[]; children: React.ReactNode }) {
   // Every page buckets moves into bar days and prints times in the viewer's timezone.
   // The server renders in its own zone (UTC on Vercel), so the page body is held back
   // until after hydration - otherwise the first client render disagrees with the server
@@ -155,10 +160,11 @@ export function Shell({ user, settings, wastageReasons, children }: { user: Sess
   return (
     <SettingsCtx.Provider value={settings}>
     <WastageReasonsCtx.Provider value={wastageReasons}>
+    <LocationsCtx.Provider value={locations}>
     <ActionCtx.Provider value={{ pending, run, say }}>
       <h2 className="sr-only">{settings.bar_name} {settings.app_subtitle.toLowerCase()}</h2>
 
-      <div className={`app${tabs.length ? "" : " solo"}`}>
+      <div className={`app${tabs.length ? "" : " solo"}`} style={Object.fromEntries(locations.flatMap((l) => [[`--${l.slug}`, l.color], ...(l.mark_color ? [[`--${l.slug}-mark`, l.mark_color]] : [])]))}>
         {tabs.length > 0 && (
           <aside className="sidebar">
             {brand}
@@ -201,6 +207,7 @@ export function Shell({ user, settings, wastageReasons, children }: { user: Sess
         </div>
       )}
     </ActionCtx.Provider>
+    </LocationsCtx.Provider>
     </WastageReasonsCtx.Provider>
     </SettingsCtx.Provider>
   );

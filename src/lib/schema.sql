@@ -202,6 +202,23 @@ insert into wastage_reasons (label, sort) values
   ('Other', 5)
 on conflict (label) do nothing;
 
+-- Bar locations. The slugs (store, patio, back) are also Item column names, so
+-- they are structural identifiers that stay fixed. This table owns the display
+-- metadata: labels, colours, and sort order.
+create table if not exists locations (
+  slug       text primary key,
+  label      text not null,
+  short      text not null,
+  color      text not null,
+  mark_color text,
+  sort       int
+);
+insert into locations (slug, label, short, color, mark_color, sort) values
+  ('store', 'Store',     'Store', '#4C94FF', null,      1),
+  ('patio', 'Patio Bar', 'Patio', '#22D3EE', '#05A5C0', 2),
+  ('back',  'Back Bar',  'Back',  '#A78BFA', '#8B5CF6', 3)
+on conflict (slug) do nothing;
+
 -- Login brute-force throttle. Keyed by the ATTEMPTED username (not users.id) so a
 -- guessed or non-existent name is throttled the same way, which is also what keeps
 -- login from leaking whether a username exists. In-memory counting can't work on

@@ -49,15 +49,15 @@ export function catHue(name: string): number {
   return (h >>> 0) % 360;
 }
 
-export const LOCS = ["store", "patio", "back"] as const;
-export type Loc = (typeof LOCS)[number];
+/** A location slug. Free text now, validated against the database. */
+export type Loc = string;
 
-export const LOC_LABEL: Record<Loc, string> = {
-  store: "Store", patio: "Patio Bar", back: "Back Bar",
-};
-/** Short form for chips and tags. */
-export const LOC_SHORT: Record<Loc, string> = {
-  store: "Store", patio: "Patio", back: "Back",
+export type Location = {
+  slug: string;
+  label: string;
+  short: string;
+  color: string;
+  mark_color: string | null;
 };
 
 export type Item = {
@@ -179,6 +179,10 @@ export type SessionUser = {
 export type Staff = {
   id: number; username: string; name: string; role: "owner" | "staff"; active: boolean;
 };
+
+/** Stock level at a location. The item's store/patio/back fields are named after the slugs. */
+export const stockAt = (i: Item, loc: Loc): number =>
+  (i as unknown as Record<string, number>)[loc] ?? 0;
 
 /** Store is whole bottles; bars are counted to 2dp. */
 export const fmt = (n: number) =>
