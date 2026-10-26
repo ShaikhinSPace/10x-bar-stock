@@ -1,6 +1,6 @@
 import "server-only";
 import { neon } from "@neondatabase/serverless";
-import { DEFAULT_SETTINGS, type Category, type Delivery, type Item, type Location, type Move, type Settings } from "./model";
+import { DEFAULT_SETTINGS, type Category, type Delivery, type Item, type Location, type Move, type Role, type Settings } from "./model";
 
 // Thrown at module load, so a missing value fails the build rather than every request.
 if (!process.env.DATABASE_URL) {
@@ -81,6 +81,11 @@ export async function getRecentMoves(sinceMs: number): Promise<Move[]> {
 export async function getWastageReasons(): Promise<string[]> {
   const rows = await sql`select label from wastage_reasons order by sort, id`;
   return rows.map((r) => r.label as string);
+}
+
+export async function getRoles(): Promise<Role[]> {
+  const rows = await sql`select slug, label, description from roles order by sort, slug`;
+  return rows.map((r) => ({ slug: r.slug as string, label: r.label as string, description: r.description as string }));
 }
 
 export async function getLocations(): Promise<Location[]> {
