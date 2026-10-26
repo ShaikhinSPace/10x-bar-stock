@@ -113,14 +113,6 @@ export type Move = {
   affects_stock: boolean;
 };
 
-export const WASTAGE_REASONS = [
-  "Spill / Breakage",
-  "Expired / Spoiled",
-  "Staff Comp / Promo",
-  "Overpour",
-  "Other",
-] as const;
-export type WastageReason = (typeof WASTAGE_REASONS)[number];
 
 /**
  * Which moves undo will actually accept, mirroring applyUndo's rule so a link is

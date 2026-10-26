@@ -65,6 +65,7 @@ type Ctx = {
 
 const ActionCtx = createContext<Ctx | null>(null);
 const SettingsCtx = createContext<Settings>(DEFAULT_SETTINGS);
+const WastageReasonsCtx = createContext<string[]>([]);
 
 export function useAction(): Ctx {
   const ctx = useContext(ActionCtx);
@@ -76,11 +77,15 @@ export function useSettings(): Settings {
   return useContext(SettingsCtx);
 }
 
+export function useWastageReasons(): string[] {
+  return useContext(WastageReasonsCtx);
+}
+
 /* ============================ shell ============================ */
 
 const noSubscribe = () => () => {};
 
-export function Shell({ user, settings, children }: { user: SessionUser; settings: Settings; children: React.ReactNode }) {
+export function Shell({ user, settings, wastageReasons, children }: { user: SessionUser; settings: Settings; wastageReasons: string[]; children: React.ReactNode }) {
   // Every page buckets moves into bar days and prints times in the viewer's timezone.
   // The server renders in its own zone (UTC on Vercel), so the page body is held back
   // until after hydration - otherwise the first client render disagrees with the server
@@ -149,6 +154,7 @@ export function Shell({ user, settings, children }: { user: SessionUser; setting
 
   return (
     <SettingsCtx.Provider value={settings}>
+    <WastageReasonsCtx.Provider value={wastageReasons}>
     <ActionCtx.Provider value={{ pending, run, say }}>
       <h2 className="sr-only">{settings.bar_name} {settings.app_subtitle.toLowerCase()}</h2>
 
@@ -195,6 +201,7 @@ export function Shell({ user, settings, children }: { user: SessionUser; setting
         </div>
       )}
     </ActionCtx.Provider>
+    </WastageReasonsCtx.Provider>
     </SettingsCtx.Provider>
   );
 }

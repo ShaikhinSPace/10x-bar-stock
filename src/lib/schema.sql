@@ -186,6 +186,22 @@ insert into settings (key, value) values
   ('business_tz',                'America/Chicago')
 on conflict (key) do nothing;
 
+-- Wastage reasons the waste form offers. Seeded with the original five; the
+-- owner can add, rename or reorder them from Manage (future). Sort preserves
+-- display order; label is what the user sees and what gets stored in moves.notes.
+create table if not exists wastage_reasons (
+  id    serial primary key,
+  label text not null unique,
+  sort  int
+);
+insert into wastage_reasons (label, sort) values
+  ('Spill / Breakage', 1),
+  ('Expired / Spoiled', 2),
+  ('Staff Comp / Promo', 3),
+  ('Overpour', 4),
+  ('Other', 5)
+on conflict (label) do nothing;
+
 -- Login brute-force throttle. Keyed by the ATTEMPTED username (not users.id) so a
 -- guessed or non-existent name is throttled the same way, which is also what keeps
 -- login from leaking whether a username exists. In-memory counting can't work on

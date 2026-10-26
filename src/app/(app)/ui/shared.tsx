@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_SETTINGS, LOCS, LOC_SHORT, WASTAGE_REASONS, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, noAlertSet, type Category, type Item, type Loc, type Move, type SessionUser, type Settings, type WastageReason } from "@/lib/model";
+import { DEFAULT_SETTINGS, LOCS, LOC_SHORT, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, noAlertSet, type Category, type Item, type Loc, type Move, type SessionUser, type Settings } from "@/lib/model";
 import { countBarBottles, countStore, giveOut, logWaste, receive, transferBar, undoMove, type Result } from "../../actions";
-import { useAction } from "../shell";
+import { useAction, useWastageReasons } from "../shell";
 
 type SheetAct = "give" | "receive" | "transfer" | "waste" | "count";
 
@@ -151,7 +151,8 @@ function Sheet({
   // Waste state - same string/partial split as transfer: a bar can spill
   // part of a bottle, the storeroom can't.
   const [wasteLoc, setWasteLoc] = useState<Loc>("patio");
-  const [wasteReason, setWasteReason] = useState<WastageReason>("Spill / Breakage");
+  const wastageReasons = useWastageReasons();
+  const [wasteReason, setWasteReason] = useState(wastageReasons[0] ?? "Spill / Breakage");
   const [wasteQtyStr, setWasteQtyStr] = useState("1");
   const wasteQty = Number(wasteQtyStr) || 0;
   const wasteIsBar = wasteLoc !== "store";
@@ -351,8 +352,8 @@ function Sheet({
           </div>
           <div className="lbl">Reason</div>
           <div className="fld" style={{ marginBottom: 16 }}>
-            <select value={wasteReason} onChange={(e) => setWasteReason(e.target.value as WastageReason)}>
-              {WASTAGE_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+            <select value={wasteReason} onChange={(e) => setWasteReason(e.target.value)}>
+              {wastageReasons.map((r) => <option key={r} value={r}>{r}</option>)}
             </select>
           </div>
           <div className="lbl">Quantity wasted</div>

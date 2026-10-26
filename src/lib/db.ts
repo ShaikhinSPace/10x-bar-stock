@@ -78,6 +78,11 @@ export async function getRecentMoves(sinceMs: number): Promise<Move[]> {
   return rows.map(toMove);
 }
 
+export async function getWastageReasons(): Promise<string[]> {
+  const rows = await sql`select label from wastage_reasons order by sort, id`;
+  return rows.map((r) => r.label as string);
+}
+
 /**
  * Every category, in display order, with what points at it.
  *
