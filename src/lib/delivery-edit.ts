@@ -18,6 +18,8 @@ export type DeliveryEdit = {
   caseSizes?: (number | null)[];
   invoice: string;
   supplier: string | null;
+  /** "YYYY-MM-DD" arrival date. Omit/null to keep the delivery's existing one. */
+  deliveryDate?: string | null;
   /** The delivery's own affects_stock, read from its existing moves — paperwork stays paperwork. */
   affectsStock: boolean;
 };
@@ -71,7 +73,8 @@ export function applyDeliveryEdit(sql: Sql, e: DeliveryEdit) {
           where i.id is null or (${e.affectsStock}::boolean and i.store + d.d < 0)
         )
     ), orig as (
-      select min(ts) as ts, min(user_id) as user_id, min(user_name) as user_name
+      select min(ts) as ts, min(user_id) as user_id, min(user_name) as user_name,
+             min(delivery_date) as delivery_date
       from moves where batch = ${e.batch} and type = 'receive'
     ), upd as (
       update items i set
@@ -84,10 +87,11 @@ export function applyDeliveryEdit(sql: Sql, e: DeliveryEdit) {
     )
     insert into moves
       (type, item_id, item_name, cat, qty, loc, user_id, user_name,
-       batch, invoice, supplier, ts, affects_stock, cost, line_case_size)
+       batch, invoice, supplier, ts, affects_stock, cost, line_case_size, delivery_date)
     select 'receive', i.id, i.name, i.cat, f.qty, 'store',
            orig.user_id, orig.user_name, ${e.batch}, ${e.invoice}, ${e.supplier}, orig.ts,
-           ${e.affectsStock}, f.cost, f.case_size
+           ${e.affectsStock}, f.cost, f.case_size,
+           coalesce(${e.deliveryDate ?? null}::date, orig.delivery_date)
     from fresh f
     join items i on i.id = f.item_id
     cross join orig

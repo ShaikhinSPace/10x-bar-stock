@@ -1,10 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { cap, fmt, fmtQty, type Category, type DeliveryLine, type Item, type SessionUser, type Delivery as Booked } from "@/lib/model";
+import { bizDayKey, cap, fmt, fmtQty, type Category, type DeliveryLine, type Item, type SessionUser, type Delivery as Booked } from "@/lib/model";
 import { editDelivery, receiveDelivery } from "../../actions";
-import { useAction } from "../shell";
+import { useAction, useSettings } from "../shell";
 import { catColor, dayKey } from "./shared";
+
+/** "2026-10-18" -> "Sun, Oct 18" without a timezone shift. */
+const fmtDay = (k: string) =>
+  new Date(`${k}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 
 /**
  * Deliveries arrive as one drop with many lines. Booking them one bottle at a
@@ -26,6 +30,11 @@ export function Delivery({
   const [q, setQ] = useState("");
   const [invoice, setInvoice] = useState("");
   const [supplier, setSupplier] = useState("");
+  const settings = useSettings();
+  // Defaults to today's business day (so a 1 AM booking still reads as last night's date);
+  // the owner changes it when booking a drop that arrived earlier.
+  const [todayKey] = useState(() => bizDayKey(Date.now(), settings.business_day_cutoff_hour, settings.business_tz));
+  const [deliveryDate, setDeliveryDate] = useState(todayKey);
   // Paperwork-only: the owner has already added these bottles to stock manually (one by one
   // through Receive, then counted the bar) and only now records the invoice. Default off —
   // a normal delivery books stock. A paperwork booking logs the invoice without touching
@@ -129,6 +138,7 @@ export function Delivery({
     setLines(new Map());
     setInvoice("");
     setSupplier("");
+    setDeliveryDate(todayKey);
     setPaperwork(false);
     setEditing(null);
     setQ("");
@@ -144,6 +154,7 @@ export function Delivery({
     })));
     setInvoice(d.invoice === "—" ? "" : d.invoice);
     setSupplier(d.supplier ?? "");
+    setDeliveryDate(d.delivery_date ?? bizDayKey(+new Date(d.ts), settings.business_day_cutoff_hour, settings.business_tz));
     // The edit preserves the delivery's own paperwork flag — a real delivery stays real,
     // a paperwork one stays paperwork. The server enforces this; the UI just reflects it.
     setPaperwork(!d.affects_stock);
@@ -161,10 +172,10 @@ export function Delivery({
     // Only clear the form once it actually worked - a rejected edit (duplicate
     // invoice, a bottle that would go negative) has to stay on screen to be fixed.
     if (editing) {
-      run(() => editDelivery(editing.batch, payload, invoice, supplier),
+      run(() => editDelivery(editing.batch, payload, invoice, supplier, deliveryDate),
         `Delivery updated — ${noun}`, reset);
     } else {
-      run(() => receiveDelivery(payload, invoice, supplier, !paperwork),
+      run(() => receiveDelivery(payload, invoice, supplier, !paperwork, deliveryDate),
         `Delivery ${paperwork ? "recorded (paperwork only)" : "booked"} — ${noun}`, reset);
     }
   }
@@ -204,6 +215,11 @@ export function Delivery({
             <datalist id="past-suppliers">
               {pastSuppliers.map((s) => <option key={s} value={s} />)}
             </datalist>
+          </div>
+          <div className="fld">
+            <label>Delivery date <span className="req">required</span></label>
+            <input type="date" value={deliveryDate} max={todayKey}
+              onChange={(e) => setDeliveryDate(e.target.value)} />
           </div>
         </div>
 
@@ -331,7 +347,7 @@ export function Delivery({
                   </div>
                 )}
               </div>
-              <button className="commit green" disabled={pending || !invoiceTrim || invoiceDup} onClick={book}>
+              <button className="commit green" disabled={pending || !invoiceTrim || invoiceDup || !deliveryDate} onClick={book}>
                 {pending
                   ? (editing ? "Saving…" : "Booking…")
                   : (editing
@@ -371,6 +387,7 @@ export function Delivery({
                       {!d.affects_stock && <span className="pbadge">paperwork</span>}
                     </span>
                     <span className="inmeta">
+                      {d.delivery_date && <>{fmtDay(d.delivery_date)} · </>}
                       {d.supplier || <span style={{ color: "var(--txt-3)" }}>no supplier</span>}
                       {d.cost !== null && <span style={{ marginLeft: 8 }}>· ${d.cost.toFixed(2)}</span>}
                     </span>

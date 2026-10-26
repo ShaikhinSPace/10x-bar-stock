@@ -165,7 +165,7 @@ const toMove = (r: Row): Move => ({
 export async function getDeliveries(limit = 100): Promise<Delivery[]> {
   const rows = await sql`
     select batch, invoice, supplier,
-           min(ts) as ts, min(user_name) as user_name, min(user_id) as user_id,
+           min(ts) as ts, to_char(min(delivery_date), 'YYYY-MM-DD') as delivery_date, min(user_name) as user_name, min(user_id) as user_id,
            sum(qty) as bottles,
            -- cost is a UNIT price (per bottle) stored on each line. The delivery total
            -- is the per-bottle cost multiplied by that line's qty, summed. sum() returns
@@ -184,7 +184,7 @@ export async function getDeliveries(limit = 100): Promise<Delivery[]> {
     limit ${limit}`;
   return rows.map((r) => ({
     batch: r.batch, invoice: r.invoice ?? "—", supplier: r.supplier,
-    ts: new Date(r.ts).toISOString(), user_name: r.user_name,
+    ts: new Date(r.ts).toISOString(), delivery_date: (r.delivery_date as string | null) ?? null, user_name: r.user_name,
     user_id: r.user_id === null ? null : Number(r.user_id),
     bottles: Number(r.bottles),
     cost: r.cost === null || r.cost === undefined ? null : Number(r.cost),
