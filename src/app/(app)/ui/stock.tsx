@@ -3,10 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, fmtQty, inCat, levelsAt, needsReorder, noAlertSet, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { cap, fmt, fmtQty, inCat, levelsAt, needsReorder, noAlertSet, openLabel, stockAt, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { giveRun, submitStocktake, undoMove } from "../../actions";
-import { useAction } from "../shell";
-import { BottleSheet, DAY, LOC_COLOR, LOC_ICON, rankIn, sumAt, timeStr, useEscapeClose } from "./shared";
+import { useAction, useLocations } from "../shell";
+import { BottleSheet, DAY, LOC_ICON, locColor, rankIn, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
 
 /* ============================ stock ============================ */
 
@@ -15,6 +15,7 @@ export function Stock({
 }: {
   items: Item[]; moves: Move[]; now: number; user: SessionUser; cats: Category[];
 }) {
+  const { slugs: LOCS, label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const nac = useMemo(() => noAlertSet(cats), [cats]);
   const [sheetId, setSheetId] = useState<number | null>(null);
@@ -25,7 +26,7 @@ export function Stock({
 
   const shown = useMemo(() => {
     let out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
-    if (lowOnly) out = loc === "store" ? out.filter((i) => needsReorder(i, nac)) : out.filter((i) => i[loc] > 0);
+    if (lowOnly) out = loc === "store" ? out.filter((i) => needsReorder(i, nac)) : out.filter((i) => stockAt(i, loc) > 0);
     // Matches the main category or any tag, so picking Well finds every well
     // bottle without changing what they count towards.
     else if (cat !== "ALL") out = out.filter((i) => inCat(i, cat));
@@ -48,7 +49,7 @@ export function Stock({
       ]
     : [
         { n: fmt(sumAt(items, loc)), l: "At this bar", cls: "accent" },
-        { n: String(items.filter((i) => i[loc] > 0).length), l: "Items stocked", cls: "" },
+        { n: String(items.filter((i) => stockAt(i, loc) > 0).length), l: "Items stocked", cls: "" },
         { n: given7, l: "Given out · 7d", cls: "" },
       ];
 
@@ -123,7 +124,7 @@ export function Stock({
       <div className="list">
         {!shown.length && <div className="empty">No bottles match.</div>}
         {shown.map((i) => {
-          const v = i[loc];
+          const v = stockAt(i, loc);
           const zero = v <= 0;
           const low = loc === "store" && !zero && needsReorder(i, nac);
           return (
@@ -173,6 +174,7 @@ function JustRan({
   moves: Move[]; user: SessionUser; pending: boolean;
 }) {
   const { run } = useAction();
+  const { short: LOC_SHORT } = useLocMaps();
   const undoable = useMemo(() => undoableMoveIds(moves), [moves]);
   const mine = useMemo(
     () => moves
@@ -219,6 +221,7 @@ export function RunMode({
 }: {
   items: Item[]; moves: Move[]; user: SessionUser;
 }) {
+  const { slugs: LOCS, label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
   const { pending, run } = useAction();
   const router = useRouter();
   // For the owner this is one screen among many, so Escape and Done both go back to
@@ -236,7 +239,7 @@ export function RunMode({
       .filter((i) => !needle || i.name.toLowerCase().includes(needle))
       // Lowest at the chosen bar floats up; no par level exists, so current
       // quantity is the proxy for "needs running". Name breaks ties.
-      .sort((a, b) => a[dest] - b[dest] || a.name.localeCompare(b.name));
+      .sort((a, b) => stockAt(a, dest) - stockAt(b, dest) || a.name.localeCompare(b.name));
   }, [items, dest, q]);
 
   const total = Object.values(queue).reduce((a, n) => a + n, 0);
@@ -277,7 +280,7 @@ export function RunMode({
             <button key={b} data-loc={b} aria-pressed={dest === b}
               className={`run-pick${dest === b ? " on" : ""}`}
               onClick={() => { setDest(b); setQueue({}); }}>
-              <span className="bd" style={{ background: LOC_COLOR[b] }} />
+              <span className="bd" style={{ background: locColor(b) }} />
               <span className="meta">
                 <span className="nm">{LOC_LABEL[b]}</span>
                 <span className="ct">running lowest at top</span>
@@ -364,6 +367,7 @@ export function Stocktake({
   /** When part of a sweep: "1 of 3". Shown after the location name. */
   step?: string;
 }) {
+  const { label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const { pending, run } = useAction();
   useEscapeClose(onClose);
@@ -406,11 +410,11 @@ export function Stocktake({
       // Store, and anything case-sized (beer by default), is a single scalar row:
       // "how many bottles are there?" — no half or quarter.
       if (loc === "store" || item.case_size > 1) {
-        if (loc !== "store" && item[loc] <= 0) continue;
-        out.push({ item, key: `${item.id}:0`, bottleIdx: 0, bottleTotal: 1, expected: item[loc] });
+        if (loc !== "store" && stockAt(item, loc) <= 0) continue;
+        out.push({ item, key: `${item.id}:0`, bottleIdx: 0, bottleTotal: 1, expected: stockAt(item, loc) });
         continue;
       }
-      const total = item[loc];
+      const total = stockAt(item, loc);
       if (total <= 0) continue;
       const levels = levelsAt(item, loc).filter((n) => n > 0);
       const breakdown = levels.length ? levels
@@ -439,7 +443,7 @@ export function Stocktake({
       if (!raw.trim()) continue;
       const v = Number(raw);
       if (!Number.isFinite(v) || v < 0) continue;
-      const agg = by.get(r.item.id) ?? { id: r.item.id, was: r.item[loc], sum: 0, filled: 0, need: need.get(r.item.id) ?? 1 };
+      const agg = by.get(r.item.id) ?? { id: r.item.id, was: stockAt(r.item, loc), sum: 0, filled: 0, need: need.get(r.item.id) ?? 1 };
       agg.sum += v;
       agg.filled += 1;
       by.set(r.item.id, agg);

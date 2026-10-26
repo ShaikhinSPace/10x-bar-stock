@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_SETTINGS, LOCS, LOC_SHORT, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, noAlertSet, type Category, type Item, type Loc, type Move, type SessionUser, type Settings } from "@/lib/model";
+import { DEFAULT_SETTINGS, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, stockAt, undoableMoveIds, noAlertSet, type Category, type Item, type Loc, type Location, type Move, type SessionUser, type Settings } from "@/lib/model";
 import { countBarBottles, countStore, giveOut, logWaste, receive, transferBar, undoMove, type Result } from "../../actions";
-import { useAction, useWastageReasons } from "../shell";
+import { useAction, useLocations, useWastageReasons } from "../shell";
 
 type SheetAct = "give" | "receive" | "transfer" | "waste" | "count";
 
@@ -40,9 +40,17 @@ export const catColor = (c: string, cats: Category[]) =>
 export const catBarColor = (c: string, cats: Category[]) =>
   cats.find((x) => x.name === c)?.bar_color ?? `oklch(0.63 0.155 ${catHue(c)})`;
 
-export const LOC_COLOR: Record<Loc, string> = {
-  store: "var(--store)", patio: "var(--patio)", back: "var(--back)",
-};
+export const locColor = (slug: Loc): string => `var(--${slug})`;
+
+export function useLocMaps() {
+  const locs = useLocations();
+  return useMemo(() => {
+    const slugs = locs.map((l) => l.slug);
+    const label = Object.fromEntries(locs.map((l) => [l.slug, l.label])) as Record<string, string>;
+    const short = Object.fromEntries(locs.map((l) => [l.slug, l.short])) as Record<string, string>;
+    return { slugs, label, short };
+  }, [locs]);
+}
 
 
 /* ============================ helpers ============================ */
@@ -53,7 +61,7 @@ export const rankIn = (cats: Category[]) => (c: string) => {
   return i < 0 ? 99 : i;
 };
 
-export const sumAt = (items: Item[], k: Loc) => items.reduce((a, i) => a + Math.max(0, i[k]), 0);
+export const sumAt = (items: Item[], k: Loc) => items.reduce((a, i) => a + Math.max(0, stockAt(i, k)), 0);
 
 /** The last 7 business days as Date objects (noon UTC of each, so TZ shifts can't drop a day). */
 export function last7(now: number, s: Settings = DEFAULT_SETTINGS): Date[] {
@@ -121,6 +129,7 @@ function Sheet({
   item: Item; recent: Move[]; undoable: Set<number>; user: SessionUser;
   onClose: () => void;
 }) {
+  const { slugs: LOCS, short: LOC_SHORT } = useLocMaps();
   const { pending, run: runAction } = useAction();
   // Every commit in here closes the sheet once it succeeds. That used to ride on
   // run()'s old default; it is stated once here instead of at all seven buttons.
@@ -194,7 +203,7 @@ function Sheet({
   const barLevels = bottles.map(Number).filter((n) => Number.isFinite(n) && n > 0);
   const barTotal = Math.round(barLevels.reduce((a, n) => a + n, 0) * 100) / 100;
   const countedBottles = barLevels.length;
-  const barDelta = Math.round((barTotal - item[countLoc === "store" ? "patio" : countLoc]) * 100) / 100;
+  const barDelta = Math.round((barTotal - stockAt(item, countLoc === "store" ? "patio" : countLoc)) * 100) / 100;
   const countLocs: Loc[] = user.role === "owner" ? ["store", "patio", "back"] : ["patio", "back"];
 
   return (
@@ -209,7 +218,7 @@ function Sheet({
           const open = openLabel(item, k);
           return (
             <div className={`c ${k}`} key={k}>
-              <div className="v">{fmtQty(item.cat, item[k], item.case_size)}</div>
+              <div className="v">{fmtQty(item.cat, stockAt(item, k), item.case_size)}</div>
               <div className="k">{LOC_SHORT[k]}</div>
               {open && <div className="o" title={levelsAt(item, k).join(" + ")}>{open}</div>}
             </div>
@@ -244,7 +253,7 @@ function Sheet({
                 onClick={() => setBar(b)}>
                 {b === "unknown"
                   ? <><span className="bd" style={{ background: "var(--line)" }} />Not sure</>
-                  : <><span className="bd" style={{ background: LOC_COLOR[b] }} />{LOC_SHORT[b]}</>}
+                  : <><span className="bd" style={{ background: locColor(b) }} />{LOC_SHORT[b]}</>}
               </button>
             ))}
           </div>
@@ -266,7 +275,7 @@ function Sheet({
             {LOCS.map((k) => (
               <button key={k} data-t={k} className={`pick${recvLoc === k ? " sel" : ""}`}
                 onClick={() => setRecvLoc(k)}>
-                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+                <span className="bd" style={{ background: locColor(k) }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
@@ -297,7 +306,7 @@ function Sheet({
                   if (transTo === k) setTransTo(k === "patio" ? "back" : "patio");
                   setTransQtyStr("1");
                 }}>
-                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+                <span className="bd" style={{ background: locColor(k) }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
@@ -307,7 +316,7 @@ function Sheet({
               <button key={k} data-t={k} className={`pick${transTo === k ? " sel" : ""}`}
                 disabled={k === transFrom}
                 onClick={() => { setTransTo(k); setTransQtyStr("1"); }}>
-                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+                <span className="bd" style={{ background: locColor(k) }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
@@ -346,7 +355,7 @@ function Sheet({
             {(user.role === "owner" ? LOCS : LOCS.filter((k) => k !== "store")).map((k) => (
               <button key={k} data-t={k} className={`pick${wasteLoc === k ? " sel" : ""}`}
                 onClick={() => { setWasteLoc(k); setWasteQtyStr("1"); }}>
-                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+                <span className="bd" style={{ background: locColor(k) }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
@@ -399,9 +408,9 @@ function Sheet({
                     setStoreCountStr(storeIsCases ? fmt(Math.floor(item.store / item.case_size)) : fmt(item.store));
                     setStoreLooseStr(storeIsCases ? fmt(item.store % item.case_size) : "0");
                   }
-                  else { setBottles(seedBottles(item, k)); setBarCountStr(fmt(item[k])); }
+                  else { setBottles(seedBottles(item, k)); setBarCountStr(fmt(stockAt(item, k))); }
                 }}>
-                <span className="bd" style={{ background: LOC_COLOR[k] }} />{LOC_SHORT[k]}
+                <span className="bd" style={{ background: locColor(k) }} />{LOC_SHORT[k]}
               </button>
             ))}
           </div>
@@ -479,7 +488,7 @@ function Sheet({
               {(() => {
                 const n = Math.max(0, Math.floor(Number(barCountStr) || 0));
                 const valid = Number.isInteger(Number(barCountStr)) && Number(barCountStr) >= 0;
-                const was = item[countLoc];
+                const was = stockAt(item, countLoc);
                 const delta = Math.round((n - was) * 100) / 100;
                 return (
                   <>
@@ -506,7 +515,7 @@ function Sheet({
               <div className="cnote">
                 {barDelta === 0
                   ? `No change — ${LOC_SHORT[countLoc]} stays at ${fmt(barTotal)}`
-                  : `${LOC_SHORT[countLoc]}: ${fmt(item[countLoc])} → ${fmt(barTotal)} (${barDelta > 0 ? "+" : ""}${fmt(barDelta)})`}
+                  : `${LOC_SHORT[countLoc]}: ${fmt(stockAt(item, countLoc))} → ${fmt(barTotal)} (${barDelta > 0 ? "+" : ""}${fmt(barDelta)})`}
               </div>
               <div className="hint" style={{ textAlign: "center", margin: "-8px 0 16px" }}>
                 One row per bottle on the bar — 1 is full, 0.5 a half, 0.25 a quarter.
@@ -543,6 +552,7 @@ function RecentOnBottle({
   recent: Move[]; undoable: Set<number>; user: SessionUser;
   pending: boolean; onUndo: (id: number) => void;
 }) {
+  const { short: LOC_SHORT } = useLocMaps();
   const shown = recent.slice(0, 4);
   if (!shown.length) return null;
 
@@ -596,7 +606,7 @@ function seedBottles(item: Item, loc: Loc): string[] {
   const known = levelsAt(item, loc).filter((n) => n > 0);
   if (known.length) return known.map((n) => String(n));
 
-  const total = item[loc];
+  const total = stockAt(item, loc);
   if (total <= 0) return ["1"];
   const full = Math.floor(total);
   const rest = Math.round((total - full) * 100) / 100;

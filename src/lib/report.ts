@@ -1,6 +1,7 @@
 import "server-only";
 import { getSettings, sql } from "./db";
-import { LOC_LABEL, cap, fmt, fmtQty, type Cat, type Loc } from "./model";
+import { getLocations } from "./db";
+import { cap, fmt, fmtQty, type Cat } from "./model";
 import type { PdfKpi, PdfReport, PdfSection } from "./pdf";
 
 /**
@@ -318,6 +319,7 @@ async function storeCorrectionsSection(cur: Window): Promise<PdfSection> {
 }
 
 async function barUsageSection(cur: Window): Promise<PdfSection> {
+  const locLabel = Object.fromEntries((await getLocations()).map((l) => [l.slug, l.label]));
   const rows = await sql`
     select m.ts, m.item_name, m.cat, m.loc, m.from_val, m.to_val, m.user_name
     from moves m join items i on i.id = m.item_id and not i.archived
@@ -348,7 +350,7 @@ async function barUsageSection(cur: Window): Promise<PdfSection> {
       const used = Math.round((from - to) * 100) / 100;
       return [
         new Date(r.ts).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
-        r.item_name, LOC_LABEL[r.loc as Loc] ?? r.loc,
+        r.item_name, locLabel[r.loc as string] ?? r.loc,
         fmtQty(cat, from), fmtQty(cat, to),
         `${used >= 0 ? "" : "+"}${fmtQty(cat, Math.abs(used))}`, r.user_name,
       ];

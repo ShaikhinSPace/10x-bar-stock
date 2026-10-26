@@ -5,7 +5,7 @@ import { sql, type Loc } from "@/lib/db";
 import { applyGiveRun } from "@/lib/give-run";
 import { applyUndo } from "@/lib/undo-move";
 import { requireOwner, requireUser } from "@/lib/auth";
-import { attempt, whole, partial, isLoc, type Result } from "./_shared";
+import { attempt, whole, partial, isLoc, knownLocs, type Result } from "./_shared";
 
 // Every export here is reachable by direct POST, so each one re-checks auth itself.
 
@@ -20,9 +20,10 @@ import { attempt, whole, partial, isLoc, type Result } from "./_shared";
 export async function giveOut(itemId: number, qty: number, to: Loc | null): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
+    const locs = await knownLocs();
     const q = whole(qty, "Quantity");
     if (q < 1) throw new Error("Give out at least 1 bottle");
-    if (to !== null && (!isLoc(to) || to === "store")) throw new Error("Give to a bar, or leave the bar unknown");
+    if (to !== null && (!isLoc(to, locs) || to === "store")) throw new Error("Give to a bar, or leave the bar unknown");
 
     const rows = await sql`
       with prev as (
@@ -76,7 +77,8 @@ export async function giveRun(
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
-    if (!isLoc(to) || to === "store") throw new Error("Pick a bar to run to");
+    const locs = await knownLocs();
+    if (!isLoc(to, locs) || to === "store") throw new Error("Pick a bar to run to");
     if (!Array.isArray(lines) || !lines.length) throw new Error("Load at least one bottle onto the run");
     if (lines.length > 300) throw new Error("That's too many bottles for one run");
 
@@ -95,7 +97,7 @@ export async function giveRun(
 
     // Shared with scripts/check-give-run.mjs, which runs this exact statement against
     // a real database — see the module for why the store guard is all-or-nothing.
-    const rows = await applyGiveRun(sql, { ids, qtys, to, userId: u.id, userName: u.name });
+    const rows = await applyGiveRun(sql, { ids, qtys, to: to as "patio" | "back", userId: u.id, userName: u.name });
 
     if (!rows.length) {
       throw new Error(
@@ -122,9 +124,10 @@ export async function giveRun(
 export async function receive(itemId: number, qty: number, loc: Loc = "store"): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
+    const locs = await knownLocs();
     const q = whole(qty, "Quantity");
     if (q < 1) throw new Error("Receive at least 1 bottle");
-    if (!isLoc(loc)) throw new Error("Pick where it's received");
+    if (!isLoc(loc, locs)) throw new Error("Pick where it's received");
 
     const rows = await sql`
       with prev as (
@@ -236,7 +239,8 @@ export async function logWaste(
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
-    if (!isLoc(loc)) throw new Error("Unknown location");
+    const locs = await knownLocs();
+    if (!isLoc(loc, locs)) throw new Error("Unknown location");
     if (loc === "store" && u.role !== "owner") {
       throw new Error("Only the owner can log waste in the storeroom");
     }
@@ -274,7 +278,8 @@ export async function transferBar(
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireUser();
-    if (!isLoc(fromLoc) || !isLoc(toLoc)) throw new Error("Invalid location selection");
+    const locs = await knownLocs();
+    if (!isLoc(fromLoc, locs) || !isLoc(toLoc, locs)) throw new Error("Invalid location selection");
     if (fromLoc === toLoc) throw new Error("Source and destination bars must be different");
 
     const isWhole = fromLoc === "store" || toLoc === "store";
@@ -369,6 +374,7 @@ export async function addEntry(
 ): Promise<Result> {
   return attempt(async () => {
     const u = await requireOwner();
+    const locs = await knownLocs();
     if (type !== "give" && type !== "receive" && type !== "count") throw new Error("Pick give, receive, or count");
     if (!Number.isFinite(atMs)) throw new Error("Pick a day for the entry");
     // Allow a few minutes of client/server clock skew, so a legitimate "today" entry
@@ -391,7 +397,7 @@ export async function addEntry(
       // Receive into the storeroom (a delivery) or straight onto a bar. Whole bottles;
       // a bar receive drops that bar's open-bottle breakdown since the new bottles'
       // composition isn't known (same as a backdated give).
-      if (!isLoc(to)) throw new Error("Pick where it's received");
+      if (!isLoc(to, locs)) throw new Error("Pick where it's received");
       if (skipStock) {
         const rows = await sql`
           with prev as (select id, name, cat from items where id = ${itemId} and not archived)
@@ -427,7 +433,7 @@ export async function addEntry(
       // so it drops that bar's breakdown rather than inventing full bottles.
       // Strict null (not loose !=): a stray undefined from a direct POST shouldn't silently
       // land as an "unknown bar" give — reject it like any other invalid loc value.
-      if (!(to === null || (isLoc(to) && to !== "store"))) throw new Error("Give to a bar, or leave the bar unknown");
+      if (!(to === null || (isLoc(to, locs) && to !== "store"))) throw new Error("Give to a bar, or leave the bar unknown");
       if (skipStock) {
         // No store >= q guard: the backdated give already happened in the past, when
         // the storeroom's number may have been higher. Any shortfall is sorted out

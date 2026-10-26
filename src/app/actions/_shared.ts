@@ -1,7 +1,7 @@
 // Shared helpers for the server actions. Kept without a "use server" directive so it
 // can export the non-async utilities (Result, isLoc, whole, partial) the actions reuse.
 
-import { sql, LOCS, type Loc } from "@/lib/db";
+import { sql, type Loc } from "@/lib/db";
 
 export type Result = { ok: true; moveId?: number } | { ok: false; error: string };
 
@@ -16,8 +16,11 @@ export async function attempt(fn: () => Promise<number | void>): Promise<Result>
   }
 }
 
-export const isLoc = (v: unknown): v is Loc => LOCS.includes(v as Loc);
-// Categories live in the database now, so validation asks it rather than a constant.
+export async function knownLocs(): Promise<Set<string>> {
+  const rows = await sql`select slug from locations`;
+  return new Set(rows.map((r) => r.slug as string));
+}
+export const isLoc = (v: unknown, locs: Set<string>): v is Loc => locs.has(v as string);
 export async function knownCats(): Promise<Set<string>> {
   const rows = await sql`select name from categories`;
   return new Set(rows.map((r) => r.name as string));

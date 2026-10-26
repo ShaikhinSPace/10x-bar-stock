@@ -35,14 +35,8 @@
   --red: #F06060;
   --red-glow: rgba(240, 96, 96, 0.12);
 
-  /* ── locations ── */
-  --store: #4C94FF;
-  --patio: #22D3EE;
-  --back: #A78BFA;
-
-  /* ── chart marks ── */
-  --patio-mark: #05A5C0;
-  --back-mark: #8B5CF6;
+  /* location colours (--store, --patio, --back, --*-mark) are set from the DB
+     via inline style on the .app wrapper in shell.tsx */
 
   /* ── fonts & radii ── */
   --sans: var(--font-inter), system-ui, -apple-system, sans-serif;

@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { LOC_LABEL, bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { setReorderIgnore, type Result } from "../../actions";
 import { useAction, useSettings } from "../shell";
-import { BottleSheet, DAY, LOC_COLOR, SortTh, catBarColor, last7, sortRows, sumAt, useColumnSort } from "./shared";
+import { BottleSheet, DAY, SortTh, catBarColor, last7, locColor, sortRows, sumAt, useColumnSort, useLocMaps } from "./shared";
 import { Stocktake } from "./stock";
 
 export function Dashboard({
@@ -12,6 +12,7 @@ export function Dashboard({
 }: {
   items: Item[]; moves: Move[]; now: number; user: SessionUser; cats: Category[];
 }) {
+  const { label: LOC_LABEL } = useLocMaps();
   const { pending, run } = useAction();
   const settings = useSettings();
   const ch = settings.business_day_cutoff_hour, tz = settings.business_tz;
@@ -373,6 +374,7 @@ function TrendCard({ moves, now }: { moves: Move[]; now: number }) {
 function BarCard({
   bar, items, moves, now,
 }: { bar: Loc; items: Item[]; moves: Move[]; now: number }) {
+  const { label: LOC_LABEL } = useLocMaps();
   const since = now - 7 * DAY;
   const evs = moves.filter((m) => m.type === "give" && m.loc === bar && +new Date(m.ts) >= since);
   const total = evs.reduce((a, m) => a + (m.qty ?? 0), 0);
@@ -387,7 +389,7 @@ function BarCard({
   return (
     <div className="card barcard">
       <div className="h">
-        <span className="bd" style={{ background: LOC_COLOR[bar] }} />
+        <span className="bd" style={{ background: locColor(bar) }} />
         <span className="bn">{LOC_LABEL[bar]}</span>
         <span className="bt">{fmt(total)}<small>pulled 7d</small></span>
       </div>
@@ -398,7 +400,7 @@ function BarCard({
           <span className="bnm">{nm}</span>
           <span className="bar-track">
             <span className="bar-fill"
-              style={{ width: `${Math.max(8, (qy / max) * 100)}%`, background: LOC_COLOR[bar] }} />
+              style={{ width: `${Math.max(8, (qy / max) * 100)}%`, background: locColor(bar) }} />
           </span>
           <span className="bq">{fmtQty(cat, qy)}</span>
         </div>
