@@ -520,7 +520,7 @@ function CategoriesCard({
       <div className="catlist">
         {cats.map((c, i) => (
           <div className="catrow" key={c.name}>
-            <span className="cdot" style={{ background: catColor(c.name) }} />
+            <span className="cdot" style={{ background: catColor(c.name, cats) }} />
 
             {editing === c.name ? (
               <input className="cedit" autoFocus value={draft} maxLength={CAT_MAX}

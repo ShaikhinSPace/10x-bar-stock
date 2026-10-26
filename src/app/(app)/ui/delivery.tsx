@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { cap, fmt, fmtQty, type DeliveryLine, type Item, type SessionUser, type Delivery as Booked } from "@/lib/model";
+import { cap, fmt, fmtQty, type Category, type DeliveryLine, type Item, type SessionUser, type Delivery as Booked } from "@/lib/model";
 import { editDelivery, receiveDelivery } from "../../actions";
 import { useAction } from "../shell";
 import { catColor, dayKey } from "./shared";
@@ -12,9 +12,9 @@ import { catColor, dayKey } from "./shared";
  * draft basket: search, add lines, then book the whole thing in one action.
  */
 export function Delivery({
-  items, deliveries, user,
+  items, deliveries, user, cats,
 }: {
-  items: Item[]; deliveries: Booked[]; user: SessionUser;
+  items: Item[]; deliveries: Booked[]; user: SessionUser; cats: Category[];
 }) {
   const { pending, run } = useAction();
   // Per-item draft. `qty` is total bottles (what the server stores). `caseSize` is
@@ -382,7 +382,7 @@ export function Delivery({
                 <div className="inlines">
                   {d.lines.map((l) => (
                     <div className="itile" key={l.item}>
-                      <span className="itdot" style={{ background: catColor(l.cat) }} />
+                      <span className="itdot" style={{ background: catColor(l.cat, cats) }} />
                       <span className="itname">
                         <span className="n">{l.item}</span>
                         <span className="c">{cap(l.cat)}</span>

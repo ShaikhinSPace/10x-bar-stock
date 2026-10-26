@@ -32,6 +32,26 @@ insert into categories (name) values
   ('WELL'), ('OTHER')
 on conflict (name) do nothing;
 
+-- Hand-picked dot colour (muted, for grouping cues) and bar-chart colour (vivid,
+-- for data encoding). Both nullable — a category without one derives a colour from
+-- its name via catHue(). raises_reorder_alerts defaults true; MIXER is the only
+-- seed category that doesn't raise alerts (juices / syrups nobody steals).
+alter table categories add column if not exists color     text;
+alter table categories add column if not exists bar_color text;
+alter table categories add column if not exists raises_reorder_alerts boolean not null default true;
+
+update categories set color = '#C08A4A', bar_color = '#C75157' where name = 'WHISKEY' and color is null;
+update categories set color = '#6FA8DC', bar_color = '#D67B19' where name = 'VODKA'   and color is null;
+update categories set color = '#8FBF6A', bar_color = '#8F7E03' where name = 'TEQUILA' and color is null;
+update categories set color = '#5FB8A8', bar_color = '#5FAB4D' where name = 'GIN'     and color is null;
+update categories set color = '#C2705A', bar_color = '#069180' where name = 'RUM'     and color is null;
+update categories set color = '#D6A63C', bar_color = '#00A6C9' where name = 'BEER'    and color is null;
+update categories set color = '#B0607F', bar_color = '#457BD5' where name = 'WINE'    and color is null;
+update categories set color = '#7E8CA8', bar_color = '#A47DE3' where name = 'MIXER'   and color is null;
+update categories set color = '#9AA3B2', bar_color = '#8A93A3' where name = 'WELL'    and color is null;
+update categories set color = '#8E86F2', bar_color = '#B55499' where name = 'OTHER'   and color is null;
+update categories set raises_reorder_alerts = false where name = 'MIXER' and raises_reorder_alerts = true;
+
 -- Display order, so Manage can reorder without renaming. Backfilled from id for
 -- rows that predate the column, which preserves the original seed order.
 alter table categories add column if not exists sort int;

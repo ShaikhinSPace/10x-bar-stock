@@ -91,7 +91,7 @@ export async function getCategories(): Promise<Category[]> {
   // live stock, so archived rows must not inflate either figure. (deleteCategory does
   // its own archived-inclusive check for the foreign key — a different question.)
   const rows = await sql`
-    select c.name,
+    select c.name, c.color, c.bar_color, c.raises_reorder_alerts,
            (select count(*) from items where cat = c.name and not archived) as items,
            (select count(distinct t.item_id) from item_tags t
               join items i on i.id = t.item_id
@@ -107,6 +107,9 @@ export async function getCategories(): Promise<Category[]> {
     items: Number(r.items),
     tags: Number(r.tags),
     refs: Number(r.refs),
+    color: (r.color as string) ?? null,
+    bar_color: (r.bar_color as string) ?? null,
+    raises_reorder_alerts: r.raises_reorder_alerts !== false,
   }));
 }
 

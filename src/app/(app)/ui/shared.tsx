@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_SETTINGS, LOCS, LOC_SHORT, WASTAGE_REASONS, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser, type Settings, type WastageReason } from "@/lib/model";
+import { DEFAULT_SETTINGS, LOCS, LOC_SHORT, WASTAGE_REASONS, addBusinessDays, bizDayKey, cap, catHue, fmt, fmtQty, levelsAt, openLabel, undoableMoveIds, noAlertSet, type Category, type Item, type Loc, type Move, type SessionUser, type Settings, type WastageReason } from "@/lib/model";
 import { countBarBottles, countStore, giveOut, logWaste, receive, transferBar, undoMove, type Result } from "../../actions";
 import { useAction } from "../shell";
 
@@ -33,48 +33,17 @@ export const LOC_ICON: Record<Loc, React.ReactNode> = {
   ),
 };
 
-/** Muted category dots — grouping cues inside a delivery, not a data encoding. */
-/** Hand-picked dots for the seeded categories; anything created later derives one. */
-const CAT_COLOR: Record<string, string> = {
-  WHISKEY: "#C08A4A", VODKA: "#6FA8DC", TEQUILA: "#8FBF6A", GIN: "#5FB8A8",
-  RUM: "#C2705A", BEER: "#D6A63C", WINE: "#B0607F", MIXER: "#7E8CA8",
-  WELL: "#9AA3B2", OTHER: "#8E86F2",
-};
+/** Look up a category's dot colour from the DB-stored value, falling back to a hue derived from the name. */
+export const catColor = (c: string, cats: Category[]) =>
+  cats.find((x) => x.name === c)?.color ?? `oklch(0.72 0.075 ${catHue(c)})`;
 
-/**
- * Categories are created by the owner now, so neither palette can be exhaustive.
- * An unknown one gets a colour derived from its name: stable across renders and
- * sessions, and in the same lightness band as the hand-picked values so a new
- * category does not glare next to them.
- */
-export const catColor = (c: string) => CAT_COLOR[c] ?? `oklch(0.72 0.075 ${catHue(c)})`;
-
-export const catBarColor = (c: string) => CAT_BAR_COLOR[c] ?? `oklch(0.63 0.155 ${catHue(c)})`;
+export const catBarColor = (c: string, cats: Category[]) =>
+  cats.find((x) => x.name === c)?.bar_color ?? `oklch(0.63 0.155 ${catHue(c)})`;
 
 export const LOC_COLOR: Record<Loc, string> = {
   store: "var(--store)", patio: "var(--patio)", back: "var(--back)",
 };
 
-/**
- * Store-by-category bars: a real data encoding, not a grouping dot, so it
- * gets its own palette rather than reusing CAT_COLOR's muted values (those
- * read fine as small dots but wash out as large fills on the dark surface).
- * Every category keeps the same bar color regardless of rank, so a
- * category's identity never repaints just because stock levels shifted.
- * Alternating lightness (0.59/0.67 OKLCH) between adjacent categories in
- * fixed hue order clears an 8+ OKLab pairwise-distance target across all 9 —
- * worst case (Whiskey/Other) checked at 10.3.
- *
- * WELL is deliberately a neutral grey rather than another hue: it is a
- * cross-cutting tag (a well bottle is also a whiskey, a gin...), so it should
- * not compete with the real spirit categories for a slot in that palette.
- * It only ever appears as a main category if someone explicitly picks it.
- */
-const CAT_BAR_COLOR: Record<string, string> = {
-  WHISKEY: "#C75157", VODKA: "#D67B19", TEQUILA: "#8F7E03", GIN: "#5FAB4D",
-  RUM: "#069180", BEER: "#00A6C9", WINE: "#457BD5", MIXER: "#A47DE3",
-  WELL: "#8A93A3", OTHER: "#B55499",
-};
 
 /* ============================ helpers ============================ */
 

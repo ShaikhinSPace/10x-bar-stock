@@ -1,15 +1,5 @@
 // Shared shapes and constants. No server imports — the client bundle pulls this in.
 
-/**
- * Categories a fresh database is seeded with, and the ones with hand-picked
- * colours. NOT the whole set — the owner creates and deletes categories from
- * Manage, so the live list comes from the categories table and is threaded
- * through as props. Treat this as defaults, never as validation.
- */
-export const SEED_CATS = [
-  "WHISKEY", "VODKA", "TEQUILA", "GIN", "RUM", "BEER", "WINE", "MIXER", "WELL", "OTHER",
-] as const;
-
 /** A category name. Free text now, so it is validated against the database. */
 export type Cat = string;
 
@@ -27,6 +17,12 @@ export type Category = {
    * `refs` drives the delete-vs-merge decision, so the two never disagree with the server.
    */
   refs: number;
+  /** Muted dot colour for grouping cues. Null → derive from name via catHue(). */
+  color: string | null;
+  /** Vivid bar-chart colour for data encoding. Null → derive from name via catHue(). */
+  bar_color: string | null;
+  /** False for categories like MIXER whose items shouldn't raise reorder alerts. */
+  raises_reorder_alerts: boolean;
 };
 
 /** Longest a category name may be; keeps chips and dropdowns from blowing out. */
@@ -233,9 +229,12 @@ export const totalOf = (i: Item) => i.store + i.patio + i.back;
  * Reorder is measured against the STORE only: you reorder from the supplier into
  * the storeroom, not into a bar.
  */
-export const NO_REORDER_ALERTS: readonly Cat[] = ["MIXER"];
-export const needsReorder = (i: Item) =>
-  !i.ignore_reorder && !NO_REORDER_ALERTS.includes(i.cat) && i.store <= i.rl;
+export const needsReorder = (i: Item, noAlertCats: Set<string>) =>
+  !i.ignore_reorder && !noAlertCats.has(i.cat) && i.store <= i.rl;
+
+/** Build the set of category names that suppress reorder alerts. */
+export const noAlertSet = (cats: Category[]) =>
+  new Set(cats.filter((c) => !c.raises_reorder_alerts).map((c) => c.name));
 
 /** "WHISKEY" -> "Whiskey", "manage" -> "Manage". */
 export const cap = (c: string) => c.charAt(0).toUpperCase() + c.slice(1).toLowerCase();

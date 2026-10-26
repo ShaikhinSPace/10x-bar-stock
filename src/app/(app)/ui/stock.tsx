@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, fmtQty, inCat, levelsAt, needsReorder, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { LOCS, LOC_LABEL, LOC_SHORT, cap, fmt, fmtQty, inCat, levelsAt, needsReorder, noAlertSet, openLabel, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { giveRun, submitStocktake, undoMove } from "../../actions";
 import { useAction } from "../shell";
 import { BottleSheet, DAY, LOC_COLOR, LOC_ICON, rankIn, sumAt, timeStr, useEscapeClose } from "./shared";
@@ -16,6 +16,7 @@ export function Stock({
   items: Item[]; moves: Move[]; now: number; user: SessionUser; cats: Category[];
 }) {
   const catRank = useMemo(() => rankIn(cats), [cats]);
+  const nac = useMemo(() => noAlertSet(cats), [cats]);
   const [sheetId, setSheetId] = useState<number | null>(null);
   const [loc, setLoc] = useState<Loc>("store");
   const [cat, setCat] = useState<string>("ALL");
@@ -24,14 +25,14 @@ export function Stock({
 
   const shown = useMemo(() => {
     let out = [...items].sort((a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name));
-    if (lowOnly) out = loc === "store" ? out.filter(needsReorder) : out.filter((i) => i[loc] > 0);
+    if (lowOnly) out = loc === "store" ? out.filter((i) => needsReorder(i, nac)) : out.filter((i) => i[loc] > 0);
     // Matches the main category or any tag, so picking Well finds every well
     // bottle without changing what they count towards.
     else if (cat !== "ALL") out = out.filter((i) => inCat(i, cat));
     const needle = q.trim().toLowerCase();
     if (needle) out = out.filter((i) => i.name.toLowerCase().includes(needle));
     return out;
-  }, [items, loc, cat, q, lowOnly, catRank]);
+  }, [items, loc, cat, q, lowOnly, catRank, nac]);
 
   const since = now - 7 * DAY;
   // One label everywhere — "Given out · 7d". For a bar view it's gives to that bar;
@@ -42,7 +43,7 @@ export function Stock({
   const stats = loc === "store"
     ? [
         { n: fmt(sumAt(items, "store")), l: "In store", cls: "accent" },
-        { n: String(items.filter(needsReorder).length), l: "Reorder", cls: "warn" },
+        { n: String(items.filter((i) => needsReorder(i, nac)).length), l: "Reorder", cls: "warn" },
         { n: given7, l: "Given out · 7d", cls: "" },
       ]
     : [
@@ -124,7 +125,7 @@ export function Stock({
         {shown.map((i) => {
           const v = i[loc];
           const zero = v <= 0;
-          const low = loc === "store" && !zero && needsReorder(i);
+          const low = loc === "store" && !zero && needsReorder(i, nac);
           return (
             <button key={i.id} onClick={() => setSheetId(i.id)}
               className={`row${zero && loc === "store" ? " zero" : ""}${low ? " lowstk" : ""}`}>

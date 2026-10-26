@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { LOC_LABEL, bizDayKey, cap, fmt, fmtQty, needsReorder, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { LOC_LABEL, bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { setReorderIgnore, type Result } from "../../actions";
 import { useAction, useSettings } from "../shell";
 import { BottleSheet, DAY, LOC_COLOR, SortTh, catBarColor, last7, sortRows, sumAt, useColumnSort } from "./shared";
@@ -39,8 +39,9 @@ export function Dashboard({
   const backTot = sumAt(items, "back");
   const grandTot = storeTot + patioTot + backTot;
 
+  const nac = noAlertSet(cats);
   // most deficient first - how far under its own line each bottle is
-  const reorder = items.filter(needsReorder).sort((a, b) => a.store - a.rl - (b.store - b.rl));
+  const reorder = items.filter((i) => needsReorder(i, nac)).sort((a, b) => a.store - a.rl - (b.store - b.rl));
   const outOfStock = reorder.filter((i) => i.store <= 0).length;
   const give7 = moves
     .filter((m) => m.type === "give" && +new Date(m.ts) >= since)
@@ -308,7 +309,7 @@ function CategoryCard({ items, cats }: { items: Item[]; cats: Category[] }) {
           <div className="catbar" key={d.c}>
             <span className="cb-name">{cap(d.c)}</span>
             <div className="cb-track">
-              <div className="cb-fill" style={{ width: `${(d.v / max) * 100}%`, background: catBarColor(d.c) }} />
+              <div className="cb-fill" style={{ width: `${(d.v / max) * 100}%`, background: catBarColor(d.c, cats) }} />
             </div>
             <span className="cb-val">{d.c === "BEER" ? fmtQty(d.c, d.v) : fmt(d.v)}</span>
           </div>
