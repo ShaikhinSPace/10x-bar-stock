@@ -230,3 +230,16 @@ create table if not exists login_attempts (
   locked_until timestamptz,
   updated_at   timestamptz not null default now()
 );
+
+-- Role display metadata. Slugs (owner/staff) stay structural: permission checks and
+-- users.role's CHECK key off them. Label and description are what the UI shows.
+create table if not exists roles (
+  slug        text primary key,
+  label       text not null,
+  description text not null,
+  sort        int
+);
+insert into roles (slug, label, description, sort) values
+  ('staff', 'Staff', 'can give out, receive and count', 1),
+  ('owner', 'Owner', 'can also edit bottles and staff', 2)
+on conflict (slug) do nothing;

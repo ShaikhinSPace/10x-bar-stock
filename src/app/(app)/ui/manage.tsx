@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import { CAT_MAX, cap, fmt, fmtQty, normCat, type Cat, type Category, type Item, type SessionUser, type Settings, type Staff } from "@/lib/model";
 import { addItem, addUser, archiveItem, createCategory, deleteCategory, editItem, moveCategory, renameCategory, resetPassword, setCaseSize, setReorderIgnore, setReorderLevel, setUserActive, updateSetting, type Result } from "../../actions";
-import { useAction, useSettings } from "../shell";
+import { useAction, useRoles, useSettings } from "../shell";
 import { SortDir, catColor, rankIn, sortRows, useColumnSort, useEscapeClose, usePopoverClose } from "./shared";
 
 type ManageSortKey = "name" | "cat" | "store" | "patio" | "back" | "rl";
@@ -15,6 +15,7 @@ export function Manage({
 }) {
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const { pending, run } = useAction();
+  const roles = useRoles();
   const [name, setName] = useState("");
   const [picked, setCat] = useState<Cat>("");
   // The pick can be renamed or deleted from the Categories card while this form is open;
@@ -154,8 +155,7 @@ export function Manage({
                     <div className="fld">
                       <label>Role</label>
                       <select value={uRole} onChange={(e) => setURole(e.target.value as "owner" | "staff")}>
-                        <option value="staff">Staff</option>
-                        <option value="owner">Owner</option>
+                        {roles.map((r) => <option key={r.slug} value={r.slug}>{r.label}</option>)}
                       </select>
                     </div>
                   </div>
@@ -163,7 +163,7 @@ export function Manage({
                     {pending ? "Adding…" : "Add person"}
                   </button>
                   <div className="hint">
-                    Staff can give out, receive and count. Owners can also edit bottles and staff.
+                    {roles.map((r) => `${r.label} ${r.description}.`).join(" ")}
                   </div>
                 </form>
               </div>
@@ -175,7 +175,7 @@ export function Manage({
           <div className={`urow${s.active ? "" : " off"}`} key={s.id}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div className="t">{s.name}</div>
-              <div className="s">@{s.username} · {s.role}{s.active ? "" : " · disabled"}</div>
+              <div className="s">@{s.username} · {roles.find((r) => r.slug === s.role)?.label ?? s.role}{s.active ? "" : " · disabled"}</div>
             </div>
             {s.active && (
               <button className="toggle"

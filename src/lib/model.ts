@@ -176,6 +176,9 @@ export type SessionUser = {
   id: number; name: string; username: string; role: "owner" | "staff";
 };
 
+/** Display metadata for a role. The slug stays structural (permission checks). */
+export type Role = { slug: string; label: string; description: string };
+
 export type Staff = {
   id: number; username: string; name: string; role: "owner" | "staff"; active: boolean;
 };

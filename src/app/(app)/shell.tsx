@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { createContext, useContext, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { cap, type Location, type SessionUser, type Settings, DEFAULT_SETTINGS } from "@/lib/model";
+import { cap, type Location, type Role, type SessionUser, type Settings, DEFAULT_SETTINGS } from "@/lib/model";
 import { logout, undoMove, type Result } from "../actions";
 
 export type Tab = "dashboard" | "stock" | "delivery" | "activity" | "manage";
@@ -67,6 +67,7 @@ const ActionCtx = createContext<Ctx | null>(null);
 const SettingsCtx = createContext<Settings>(DEFAULT_SETTINGS);
 const WastageReasonsCtx = createContext<string[]>([]);
 const LocationsCtx = createContext<Location[]>([]);
+const RolesCtx = createContext<Role[]>([]);
 
 export function useAction(): Ctx {
   const ctx = useContext(ActionCtx);
@@ -82,6 +83,10 @@ export function useWastageReasons(): string[] {
   return useContext(WastageReasonsCtx);
 }
 
+export function useRoles(): Role[] {
+  return useContext(RolesCtx);
+}
+
 export function useLocations(): Location[] {
   return useContext(LocationsCtx);
 }
@@ -90,7 +95,7 @@ export function useLocations(): Location[] {
 
 const noSubscribe = () => () => {};
 
-export function Shell({ user, settings, wastageReasons, locations, children }: { user: SessionUser; settings: Settings; wastageReasons: string[]; locations: Location[]; children: React.ReactNode }) {
+export function Shell({ user, settings, wastageReasons, locations, roles, children }: { user: SessionUser; settings: Settings; wastageReasons: string[]; locations: Location[]; roles: Role[]; children: React.ReactNode }) {
   // Every page buckets moves into bar days and prints times in the viewer's timezone.
   // The server renders in its own zone (UTC on Vercel), so the page body is held back
   // until after hydration - otherwise the first client render disagrees with the server
@@ -161,6 +166,7 @@ export function Shell({ user, settings, wastageReasons, locations, children }: {
     <SettingsCtx.Provider value={settings}>
     <WastageReasonsCtx.Provider value={wastageReasons}>
     <LocationsCtx.Provider value={locations}>
+    <RolesCtx.Provider value={roles}>
     <ActionCtx.Provider value={{ pending, run, say }}>
       <h2 className="sr-only">{settings.bar_name} {settings.app_subtitle.toLowerCase()}</h2>
 
@@ -180,7 +186,7 @@ export function Shell({ user, settings, wastageReasons, locations, children }: {
           <main className="wrap">
             <div className="whoami">
               <span className="nm">Signed in as {user.name}</span>
-              <span className="role">{user.role}</span>
+              <span className="role">{roles.find((r) => r.slug === user.role)?.label ?? user.role}</span>
               <button onClick={() => logout()}>Sign out</button>
             </div>
 
@@ -207,6 +213,7 @@ export function Shell({ user, settings, wastageReasons, locations, children }: {
         </div>
       )}
     </ActionCtx.Provider>
+    </RolesCtx.Provider>
     </LocationsCtx.Provider>
     </WastageReasonsCtx.Provider>
     </SettingsCtx.Provider>
