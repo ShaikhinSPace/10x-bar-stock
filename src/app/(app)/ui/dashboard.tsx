@@ -47,7 +47,10 @@ export function Dashboard({
   const nac = noAlertSet(cats);
   // most deficient first - how far under its own line each bottle is
   const reorder = items.filter((i) => needsReorder(i, nac)).sort((a, b) => a.store - a.rl - (b.store - b.rl));
-  const outOfStock = reorder.filter((i) => i.store <= 0).length;
+  // Out of stock and Low are disjoint: a bottle at zero is only ever counted as out.
+  const out = reorder.filter((i) => i.store <= 0);
+  const low = reorder.filter((i) => i.store > 0);
+  const outOfStock = out.length;
   const give7 = moves
     .filter((m) => m.type === "give" && +new Date(m.ts) >= since)
     .reduce((a, m) => a + (m.qty ?? 0), 0);
@@ -117,8 +120,8 @@ export function Dashboard({
     ],
   });
   const panels: Record<PanelKey, { title: string; entries: Entry[] }> = {
-    out: { title: "Out of stock", entries: reorder.filter((i) => i.store <= 0).map((i) => stockEntry(i, "red")) },
-    reorder: { title: "Reorder", entries: reorder.map((i) => stockEntry(i, i.store <= 0 ? "red" : "amber", true)) },
+    out: { title: "Out of stock", entries: out.map((i) => stockEntry(i, "red")) },
+    reorder: { title: "Reorder", entries: low.map((i) => stockEntry(i, "amber", true)) },
     give: { title: "Given out · 7d", entries: fromMoves((m) => m.type === "give"
       ? { qty: m.qty ?? 0, line: [`${m.loc ? LOC_SHORT[m.loc] : "?"} · ${when(m)}`, fmtQty(m.cat, m.qty ?? 0)] } : null) },
     poured: { title: "Poured · 7d", entries: fromMoves((m) => {
@@ -174,8 +177,8 @@ export function Dashboard({
           <button className={`tile${outOfStock ? " badstate" : ""}`} onClick={() => setPanel("out")}>
             <div className="v">{outOfStock}</div><div className="k">Out of stock</div>
           </button>
-          <button className={`tile${reorder.length ? " warnstate" : ""}`} onClick={() => setPanel("reorder")}>
-            <div className="v">{reorder.length}</div><div className="k">Reorder</div>
+          <button className={`tile${low.length ? " warnstate" : ""}`} onClick={() => setPanel("reorder")}>
+            <div className="v">{low.length}</div><div className="k">Reorder</div>
           </button>
           <button className="tile" onClick={() => setPanel("give")}>
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
