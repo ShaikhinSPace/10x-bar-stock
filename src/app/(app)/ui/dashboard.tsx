@@ -1,7 +1,8 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, stockAt, totalOf, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, stockAt, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { setReorderIgnore } from "../../actions";
 import { useAction, useSettings } from "../shell";
 import { BottleSheet, DAY, catBarColor, dayKey, last7, locColor, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
@@ -19,6 +20,7 @@ export function Dashboard({
   const ch = settings.business_day_cutoff_hour, tz = settings.business_tz;
   const [sheetId, setSheetId] = useState<number | null>(null);
   const [panel, setPanel] = useState<PanelKey | null>(null);
+  const router = useRouter();
   const [sweepStep, setSweepStep] = useState<number | null>(null); // null = closed, 0..2 = step index
   const SWEEP: Loc[] = ["patio", "back", "store"];
 
@@ -106,19 +108,17 @@ export function Dashboard({
     }
     return [...per.values()].sort((a, b) => b.n - a.n).map((e) => ({ ...e, value: fmtQty(e.cat, e.n) }));
   };
-  const stockEntry = (i: Item, tone?: Entry["tone"]): Entry => ({
+  const stockEntry = (i: Item, tone?: Entry["tone"], withReorderAt = false): Entry => ({
     key: String(i.id), id: i.id, name: i.name, cat: i.cat, tone,
     value: fmtQty(i.cat, i.store, i.case_size),
     lines: [
       ...LOCS.map((l): [string, string] => [LOC_LABEL[l], fmtQty(i.cat, stockAt(i, l), i.case_size)]),
-      ["Reorder at", fmtQty(i.cat, i.rl, i.case_size)],
+      ...(withReorderAt ? [["Reorder at", fmtQty(i.cat, i.rl, i.case_size)] as [string, string]] : []),
     ],
   });
   const panels: Record<PanelKey, { title: string; entries: Entry[] }> = {
-    total: { title: "Total bottles", entries: items.filter((i) => totalOf(i) > 0).sort((a, b) => totalOf(b) - totalOf(a))
-      .map((i) => ({ ...stockEntry(i), value: fmtQty(i.cat, totalOf(i), i.case_size) })) },
     out: { title: "Out of stock", entries: reorder.filter((i) => i.store <= 0).map((i) => stockEntry(i, "red")) },
-    reorder: { title: "Reorder", entries: reorder.map((i) => stockEntry(i, i.store <= 0 ? "red" : "amber")) },
+    reorder: { title: "Reorder", entries: reorder.map((i) => stockEntry(i, i.store <= 0 ? "red" : "amber", true)) },
     give: { title: "Given out · 7d", entries: fromMoves((m) => m.type === "give"
       ? { qty: m.qty ?? 0, line: [`${m.loc ? LOC_SHORT[m.loc] : "?"} · ${when(m)}`, fmtQty(m.cat, m.qty ?? 0)] } : null) },
     poured: { title: "Poured · 7d", entries: fromMoves((m) => {
@@ -163,7 +163,7 @@ export function Dashboard({
         </div>
 
         <div className="tiles">
-          <button className="tile" onClick={() => setPanel("total")}>
+          <button className="tile" onClick={() => router.push("/stock")}>
             <div className="v">{fmt(grandTot)}</div><div className="k">Total bottles</div>
             <div className="sp">
               <span>Store <b>{fmt(storeTot)}</b></span>
@@ -203,7 +203,7 @@ export function Dashboard({
         <TileList title={open.title} entries={open.entries} pending={pending}
           onClose={() => setPanel(null)}
           onPick={(id) => { setPanel(null); setSheetId(id); }}
-          ignore={user.role === "owner" && (panel === "out" || panel === "reorder")
+          ignore={user.role === "owner" && panel === "reorder"
             ? (e) => run(() => setReorderIgnore(e.id, true), `${e.name} won't raise reorder alerts anymore`)
             : undefined} />
       )}
@@ -250,7 +250,7 @@ type Entry = {
   key: string; id: number; name: string; cat: Cat; value: string;
   tone?: "red" | "amber" | "green"; lines: [string, string][];
 };
-type PanelKey = "total" | "out" | "reorder" | "give" | "poured" | "waste";
+type PanelKey = "out" | "reorder" | "give" | "poured" | "waste";
 
 /**
  * The pop-up behind every tile: one collapsible row per bottle, opened for the
