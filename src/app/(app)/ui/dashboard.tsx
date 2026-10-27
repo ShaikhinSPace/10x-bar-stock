@@ -1,10 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
-import { setReorderIgnore, type Result } from "../../actions";
+import { bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, stockAt, totalOf, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
+import { setReorderIgnore } from "../../actions";
 import { useAction, useSettings } from "../shell";
-import { BottleSheet, DAY, SortTh, catBarColor, last7, locColor, sortRows, sumAt, useColumnSort, useLocMaps } from "./shared";
+import { BottleSheet, DAY, catBarColor, dayKey, last7, locColor, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
 import { Stocktake } from "./stock";
 
 export function Dashboard({
@@ -12,11 +12,13 @@ export function Dashboard({
 }: {
   items: Item[]; moves: Move[]; now: number; user: SessionUser; cats: Category[];
 }) {
-  const { label: LOC_LABEL } = useLocMaps();
+  const locMaps = useLocMaps();
+  const LOC_LABEL = locMaps.label;
   const { pending, run } = useAction();
   const settings = useSettings();
   const ch = settings.business_day_cutoff_hour, tz = settings.business_tz;
   const [sheetId, setSheetId] = useState<number | null>(null);
+  const [panel, setPanel] = useState<PanelKey | null>(null);
   const [sweepStep, setSweepStep] = useState<number | null>(null); // null = closed, 0..2 = step index
   const SWEEP: Loc[] = ["patio", "back", "store"];
 
@@ -88,6 +90,47 @@ export function Dashboard({
     return mins < 60 ? `${mins}m ago` : `${Math.round(mins / 60)}h ago`;
   };
 
+  const { slugs: LOCS, short: LOC_SHORT } = locMaps;
+  const when = (m: Move) => `${dayKey(+new Date(m.ts), now)} ${timeStr(+new Date(m.ts))} · ${m.user_name}`;
+  // One entry per bottle, built from the moves behind a 7-day figure.
+  const fromMoves = (pick: (m: Move) => { qty: number; line: [string, string] } | null, tone?: Entry["tone"]): Entry[] => {
+    const per = new Map<number, Entry & { n: number }>();
+    for (const m of moves) {
+      if (+new Date(m.ts) < since) continue;
+      const r = pick(m);
+      if (!r || r.qty <= 0) continue;
+      const e = per.get(m.item_id) ?? { key: String(m.item_id), id: m.item_id, name: m.item_name, cat: m.cat, value: "", tone, lines: [], n: 0 };
+      e.n += r.qty;
+      e.lines.push(r.line);
+      per.set(m.item_id, e);
+    }
+    return [...per.values()].sort((a, b) => b.n - a.n).map((e) => ({ ...e, value: fmtQty(e.cat, e.n) }));
+  };
+  const stockEntry = (i: Item, tone?: Entry["tone"]): Entry => ({
+    key: String(i.id), id: i.id, name: i.name, cat: i.cat, tone,
+    value: fmtQty(i.cat, i.store, i.case_size),
+    lines: [
+      ...LOCS.map((l): [string, string] => [LOC_LABEL[l], fmtQty(i.cat, stockAt(i, l), i.case_size)]),
+      ["Reorder at", fmtQty(i.cat, i.rl, i.case_size)],
+    ],
+  });
+  const panels: Record<PanelKey, { title: string; entries: Entry[] }> = {
+    total: { title: "Total bottles", entries: items.filter((i) => totalOf(i) > 0).sort((a, b) => totalOf(b) - totalOf(a))
+      .map((i) => ({ ...stockEntry(i), value: fmtQty(i.cat, totalOf(i), i.case_size) })) },
+    out: { title: "Out of stock", entries: reorder.filter((i) => i.store <= 0).map((i) => stockEntry(i, "red")) },
+    reorder: { title: "Reorder", entries: reorder.map((i) => stockEntry(i, i.store <= 0 ? "red" : "amber")) },
+    give: { title: "Given out · 7d", entries: fromMoves((m) => m.type === "give"
+      ? { qty: m.qty ?? 0, line: [`${m.loc ? LOC_SHORT[m.loc] : "?"} · ${when(m)}`, fmtQty(m.cat, m.qty ?? 0)] } : null) },
+    poured: { title: "Poured · 7d", entries: fromMoves((m) => {
+      if (m.type !== "count" || m.loc === "store" || !m.loc) return null;
+      const d = Math.max(0, (m.from_val ?? 0) - (m.to_val ?? 0));
+      return { qty: d, line: [`${LOC_SHORT[m.loc]} · ${when(m)}`, `${fmt(m.from_val ?? 0)} → ${fmt(m.to_val ?? 0)}`] };
+    }) },
+    waste: { title: "Wasted · 7d", entries: fromMoves((m) => m.type === "waste"
+      ? { qty: m.qty ?? 0, line: [`${m.notes || "Spill / Breakage"} · ${when(m)}`, fmtQty(m.cat, m.qty ?? 0)] } : null, "red") },
+  };
+  const open = panel ? panels[panel] : null;
+
   return (
     <>
       <div className="ptitle">Dashboard <span className="sub">{new Date(now).toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' })}</span></div>
@@ -120,36 +163,30 @@ export function Dashboard({
         </div>
 
         <div className="tiles">
-          <div className="tile">
+          <button className="tile" onClick={() => setPanel("total")}>
             <div className="v">{fmt(grandTot)}</div><div className="k">Total bottles</div>
             <div className="sp">
               <span>Store <b>{fmt(storeTot)}</b></span>
               <span>Patio <b>{fmt(patioTot)}</b></span>
               <span>Back <b>{fmt(backTot)}</b></span>
             </div>
-          </div>
-          <button className={`tile${outOfStock ? " badstate" : ""}`}
-            onClick={() => document.getElementById("reorder-table")
-              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+          </button>
+          <button className={`tile${outOfStock ? " badstate" : ""}`} onClick={() => setPanel("out")}>
             <div className="v">{outOfStock}</div><div className="k">Out of stock</div>
           </button>
-          <button className={`tile${reorder.length ? " warnstate" : ""}`}
-            onClick={() => document.getElementById("reorder-table")
-              ?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+          <button className={`tile${reorder.length ? " warnstate" : ""}`} onClick={() => setPanel("reorder")}>
             <div className="v">{reorder.length}</div><div className="k">Reorder</div>
           </button>
-          <div className="tile">
+          <button className="tile" onClick={() => setPanel("give")}>
             <div className="v">{fmt(give7)}</div><div className="k">Given out · 7d</div>
-          </div>
-          <div className="tile">
+          </button>
+          <button className="tile" onClick={() => setPanel("poured")}>
             <div className="v">{fmt(poured7)}</div><div className="k">Poured · 7d</div>
-          </div>
-          <div className={`tile${waste7 > 0 ? " warnstate" : ""}`}>
+          </button>
+          <button className={`tile${waste7 > 0 ? " warnstate" : ""}`} onClick={() => setPanel("waste")}>
             <div className="v">{fmt(waste7)}</div><div className="k">Wasted · 7d</div>
-          </div>
+          </button>
         </div>
-
-        <ReorderTable rows={reorder} onPick={setSheetId} canIgnore={user.role === "owner"} pending={pending} run={run} />
 
         <CategoryCard items={items} cats={cats} />
         <TrendCard moves={moves} now={now} />
@@ -161,6 +198,15 @@ export function Dashboard({
           <TopMoversCard moves={moves} now={now} />
         </div>
       </div>
+
+      {open && (
+        <TileList title={open.title} entries={open.entries} pending={pending}
+          onClose={() => setPanel(null)}
+          onPick={(id) => { setPanel(null); setSheetId(id); }}
+          ignore={user.role === "owner" && (panel === "out" || panel === "reorder")
+            ? (e) => run(() => setReorderIgnore(e.id, true), `${e.name} won't raise reorder alerts anymore`)
+            : undefined} />
+      )}
 
       <BottleSheet items={items} moves={moves} id={sheetId} user={user}
         onClose={() => setSheetId(null)} />
@@ -200,87 +246,65 @@ function WastageCard({ moves, now }: { moves: Move[]; now: number }) {
   );
 }
 
+type Entry = {
+  key: string; id: number; name: string; cat: Cat; value: string;
+  tone?: "red" | "amber" | "green"; lines: [string, string][];
+};
+type PanelKey = "total" | "out" | "reorder" | "give" | "poured" | "waste";
+
 /**
- * Reorder is a table, not a list of cards: every row carries five facts and the
- * whole list has to be readable, so nothing is truncated - it scrolls instead.
- * "On bars" is here because a zero storeroom reads very differently when there
- * are still three bottles out on the Patio.
+ * The pop-up behind every tile: one collapsible row per bottle, opened for the
+ * numbers (or the individual moves) behind the tile's figure. "Open bottle" hands
+ * off to the normal bottle sheet.
  */
-type ReorderSortKey = "name" | "store" | "onBars" | "rl";
-
-function ReorderTable({
-  rows, onPick, canIgnore, pending, run,
+function TileList({
+  title, entries, onPick, onClose, ignore, pending,
 }: {
-  rows: Item[]; onPick: (id: number) => void; canIgnore: boolean; pending: boolean;
-  run: (fn: () => Promise<Result>, ok: string, onOk?: () => void) => void;
+  title: string; entries: Entry[]; onPick: (id: number) => void; onClose: () => void;
+  ignore?: (e: Entry) => void; pending: boolean;
 }) {
-  const { sort, toggle } = useColumnSort<ReorderSortKey>();
-  const shown = sortRows(rows, sort, (i, key) =>
-    key === "name" ? i.name : key === "store" ? i.store : key === "onBars" ? i.patio + i.back : i.rl);
-
+  useEscapeClose(onClose);
   return (
-    <div className="card at-reorder" id="reorder-table">
-      <div className="ch">
-        <h3>Reorder</h3>
-        <span className={`badge${rows.length ? " red" : ""}`}>{rows.length}</span>
+    <>
+      <div className="scrim show" onClick={onClose} />
+      <div className="sheet show">
+        <div className="sheet-in">
+          <div className="grab" />
+          <button className="sheet-close" aria-label="Close" onClick={onClose}>×</button>
+          <div className="sname">{title} <span className="badge">{entries.length}</span></div>
+          <div style={{ marginTop: 12 }}>
+            {!entries.length && <div className="empty" style={{ padding: 18 }}>Nothing here.</div>}
+            {entries.map((e) => (
+              <details className="inv" key={e.key}>
+                <summary>
+                  <span className="ino" style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.name}</span>
+                  <span className="incount" style={e.tone ? { color: `var(--${e.tone})` } : undefined}>{e.value}</span>
+                </summary>
+                <div className="inbody">
+                  <div className="inlines">
+                    {e.lines.map(([k, v], i) => (
+                      <div className="itile" key={i}>
+                        <span className="itname"><span className="c">{k}</span></span>
+                        <span className="itq" style={{ color: "var(--txt)", background: "none" }}>{v}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="inby">
+                    <span>{cap(e.cat)}</span>
+                    <span style={{ display: "flex", gap: 8 }}>
+                      {ignore && (
+                        <button className="inedit" disabled={pending} onClick={() => ignore(e)}>Stop alerts</button>
+                      )}
+                      <button className="inedit" onClick={() => onPick(e.id)}>Open bottle</button>
+                    </span>
+                  </div>
+                </div>
+              </details>
+            ))}
+          </div>
+        </div>
       </div>
-      {!rows.length ? (
-        <div className="empty" style={{ padding: 18 }}>
-          Everything&apos;s above its reorder point.
-        </div>
-      ) : (
-        <div className="rscroll">
-          <table className="rtable">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <SortTh label="Bottle" thKey="name" sort={sort} toggle={toggle} />
-                <SortTh label="In store" thKey="store" sort={sort} toggle={toggle} className="num" />
-                <SortTh label="On bars" thKey="onBars" sort={sort} toggle={toggle} className="num hide-sm" />
-                <SortTh label="Reorder at" thKey="rl" sort={sort} toggle={toggle} className="num" />
-                {canIgnore && <th className="num"><span className="sr-only">Ignore</span></th>}
-              </tr>
-            </thead>
-            <tbody>
-              {shown.map((i) => {
-                const isOut = i.store <= 0;
-                return (
-                  <tr key={i.id} onClick={() => onPick(i.id)}>
-                    <td>
-                      <span className={`rstat ${isOut ? "out" : "low"}`}>
-                        <i />{isOut ? "Out" : "Low"}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="nm">{i.name}</div>
-                      <div className="cat">{cap(i.cat)}</div>
-                    </td>
-                    <td className="num short">{fmtQty(i.cat, i.store, i.case_size)}</td>
-                    <td className="num hide-sm">{fmtQty(i.cat, i.patio + i.back, i.case_size)}</td>
-                    <td className="num">{fmtQty(i.cat, i.rl, i.case_size)}</td>
-                    {canIgnore && (
-                      <td className="num">
-                        <button className="rignore" disabled={pending}
-                          aria-label={`Ignore reorder alerts for ${i.name}`}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            run(() => setReorderIgnore(i.id, true), `${i.name} won't raise reorder alerts anymore`);
-                          }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <path d="M2 2l20 20M6.7 6.7A6 6 0 0 0 6 10c0 4-2 5-2 5h11M14 17a2 2 0 0 1-3.46 1.37M11 5.06A6 6 0 0 1 18 11c0 1.7.34 2.9.75 3.75"
-                              strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </button>
-                      </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+    </>
   );
 }
 
