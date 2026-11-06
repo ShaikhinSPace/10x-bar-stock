@@ -272,7 +272,7 @@ h1, h2, h3 { margin: 0; font-family: var(--disp); font-weight: 600; letter-spaci
 .search input::placeholder { color: var(--txt-3); }
 .search .clr {
   color: var(--txt-3); font-size: 20px; padding: 0 2px;
-  display: none; transition: color 0.15s ease;
+  transition: color 0.15s ease;
 }
 @media (hover: hover) and (pointer: fine) { .search .clr:hover { color: var(--txt); } }
 
