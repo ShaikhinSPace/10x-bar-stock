@@ -96,10 +96,10 @@ export const timeStr = (ts: number) =>
  * a give logged from here re-renders the page and the numbers follow.
  */
 export function BottleSheet({
-  items, moves, id, user, onClose,
+  items, moves, id, user, onClose, activeLoc,
 }: {
   items: Item[]; moves: Move[]; id: number | null; user: SessionUser;
-  onClose: () => void;
+  onClose: () => void; activeLoc?: Loc;
 }) {
   const item = id === null ? null : items.find((i) => i.id === id) ?? null;
   // Undoability is judged across every bottle, then narrowed to this one: the rule
@@ -116,7 +116,7 @@ export function BottleSheet({
       <div className={`sheet${item ? " show" : ""}`}>
         {item && (
           <Sheet key={item.id} item={item} recent={mine} undoable={undoable} user={user}
-            onClose={onClose} />
+            onClose={onClose} activeLoc={activeLoc} />
         )}
       </div>
     </>
@@ -124,10 +124,10 @@ export function BottleSheet({
 }
 
 function Sheet({
-  item, recent, undoable, user, onClose,
+  item, recent, undoable, user, onClose, activeLoc,
 }: {
   item: Item; recent: Move[]; undoable: Set<number>; user: SessionUser;
-  onClose: () => void;
+  onClose: () => void; activeLoc?: Loc;
 }) {
   const { slugs: LOCS, short: LOC_SHORT } = useLocMaps();
   const { pending, run: runAction } = useAction();
@@ -171,11 +171,12 @@ function Sheet({
   // storeroom counts a single scalar (whole sealed bottles). Owner-only on store, so
   // that store-count stays an intentional reconciliation, not an "oh I'll just type
   // whatever" that masks real leakage. Bar counts stay staff-accessible.
-  const [countLoc, setCountLoc] = useState<Loc>("patio");
-  const [bottles, setBottles] = useState<string[]>(() => seedBottles(item, "patio"));
+  const initLoc: Loc = activeLoc === "store" && user.role !== "owner" ? "patio" : (activeLoc ?? "patio");
+  const [countLoc, setCountLoc] = useState<Loc>(initLoc);
+  const [bottles, setBottles] = useState<string[]>(() => seedBottles(item, initLoc));
   // For case-sized bottles (beer, by default), a bar count is just an integer — no
   // half or quarter. One state string drives that input across bars.
-  const [barCountStr, setBarCountStr] = useState<string>(() => fmt(item.patio));
+  const [barCountStr, setBarCountStr] = useState<string>(() => fmt(stockAt(item, initLoc)));
   // Store count. Case-sized bottles count IN CASES — "1 case" not "24 bottles" — because
   // that's how the storeroom is actually walked. The server still stores bottles, so a
   // typed value is multiplied by case_size before saving.

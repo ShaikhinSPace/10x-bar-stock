@@ -151,7 +151,7 @@ export function Stock({
       </div>
 
       <BottleSheet items={items} moves={moves} id={sheetId} user={user}
-        onClose={() => setSheetId(null)} />
+        onClose={() => setSheetId(null)} activeLoc={loc} />
     </>
   );
 }
