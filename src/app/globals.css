@@ -1490,6 +1490,24 @@ body:has(.app.solo) { padding-bottom: 24px; }
 }
 @media (hover: hover) and (pointer: fine) { .dl-x:hover { background: var(--red-glow); color: var(--red); } }
 
+.dl-price {
+  display: flex; align-items: center; gap: 0;
+}
+.dl-price input {
+  width: 72px; text-align: right; padding: 6px 8px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); color: var(--txt); font-size: 13px;
+}
+.dl-price input::-webkit-outer-spin-button,
+.dl-price input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.dl-per {
+  flex: none; padding: 4px 6px; margin-left: 2px;
+  font-size: 11px; font-weight: 600; color: var(--blue);
+  background: var(--surface-2); border: 1px solid var(--line);
+  border-radius: var(--r-sm); cursor: pointer; white-space: nowrap;
+}
+@media (hover: hover) and (pointer: fine) { .dl-per:hover { background: var(--surface-3); } }
+
 .dfoot {
   display: flex; align-items: center; gap: 14px;
   margin-top: 16px; padding-top: 16px;

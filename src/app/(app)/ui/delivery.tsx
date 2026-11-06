@@ -25,7 +25,7 @@ export function Delivery({
   // bottles-per-case AS DELIVERED for this line, so beer orders that come in 24-packs
   // one week and 30-packs the next both record truthfully. For case-sized items the UI
   // edits cases; qty is cases × caseSize.
-  type Draft = { qty: number; cost: string; caseSize: number };
+  type Draft = { qty: number; cost: string; caseSize: number; costPer: "bottle" | "case" };
   const [lines, setLines] = useState<Map<number, Draft>>(new Map());
   const [q, setQ] = useState("");
   const [invoice, setInvoice] = useState("");
@@ -69,15 +69,23 @@ export function Delivery({
 
   const drafted = [...lines.entries()];
   const totalBottles = drafted.reduce((a, [, d]) => a + d.qty, 0);
-  // Per-line cost is a UNIT price (per bottle). Delivery total multiplies by qty.
-  // A half-typed line is excluded rather than coerced to NaN.
-  const unitPrice = (d: { cost: string }) => {
+  const parseCost = (d: { cost: string }) => {
     const n = Number(d.cost);
     return d.cost.trim() === "" || !Number.isFinite(n) ? null : n;
   };
-  const lineTotal = (qty: number, d: { cost: string }) => {
-    const u = unitPrice(d);
-    return u === null ? null : Math.round(qty * u * 100) / 100;
+  const lineTotal = (qty: number, d: Draft) => {
+    const c = parseCost(d);
+    if (c === null) return null;
+    if (d.costPer === "case") {
+      const cases = Math.round(qty / Math.max(1, d.caseSize));
+      return Math.round(cases * c * 100) / 100;
+    }
+    return Math.round(qty * c * 100) / 100;
+  };
+  const perBottleCost = (d: Draft) => {
+    const c = parseCost(d);
+    if (c === null) return null;
+    return d.costPer === "case" ? Math.round((c / Math.max(1, d.caseSize)) * 100) / 100 : c;
   };
   const totalCost = drafted.reduce((a, [, d]) => {
     const lt = lineTotal(d.qty, d);
@@ -94,22 +102,29 @@ export function Delivery({
   const setQty = (id: number, n: number) =>
     setLines((prev) => {
       const next = new Map(prev);
-      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1 };
+      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1, costPer: "bottle" };
       if (n <= 0) next.delete(id); else next.set(id, { ...curr, qty: n });
       return next;
     });
   const setQtyKeep = (id: number, n: number) =>
     setLines((prev) => {
       const next = new Map(prev);
-      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1 };
+      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1, costPer: "bottle" };
       next.set(id, { ...curr, qty: Math.max(0, n) });
       return next;
     });
   const setLineCost = (id: number, c: string) =>
     setLines((prev) => {
       const next = new Map(prev);
-      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1 };
+      const curr = next.get(id) ?? { qty: 0, cost: "", caseSize: 1, costPer: "bottle" };
       next.set(id, { ...curr, cost: c });
+      return next;
+    });
+  const toggleCostPer = (id: number) =>
+    setLines((prev) => {
+      const next = new Map(prev);
+      const curr = next.get(id); if (!curr) return next;
+      next.set(id, { ...curr, costPer: curr.costPer === "bottle" ? "case" : "bottle" });
       return next;
     });
   // Changing bottles-per-case rescales qty so the "cases" number the user sees stays the same.
@@ -127,7 +142,7 @@ export function Delivery({
     const cs = Math.max(1, i.case_size);
     setLines((prev) => {
       const next = new Map(prev);
-      const curr = next.get(i.id) ?? { qty: 0, cost: "", caseSize: cs };
+      const curr = next.get(i.id) ?? { qty: 0, cost: "", caseSize: cs, costPer: cs > 1 ? "case" : "bottle" };
       next.set(i.id, { ...curr, qty: curr.qty + curr.caseSize });
       return next;
     });
@@ -150,7 +165,9 @@ export function Delivery({
     setLines(new Map(d.lines.map((l) => {
       const item = byId.get(l.item_id);
       const cs = l.case_size ?? item?.case_size ?? 1;
-      return [l.item_id, { qty: l.qty, cost: l.cost === null ? "" : String(l.cost), caseSize: Math.max(1, cs) }];
+      const isCase = cs > 1;
+      const costVal = l.cost === null ? "" : isCase ? String(Math.round(l.cost * cs * 100) / 100) : String(l.cost);
+      return [l.item_id, { qty: l.qty, cost: costVal, caseSize: Math.max(1, cs), costPer: isCase ? "case" as const : "bottle" as const }];
     })));
     setInvoice(d.invoice === "—" ? "" : d.invoice);
     setSupplier(d.supplier ?? "");
@@ -165,7 +182,7 @@ export function Delivery({
   function book() {
     const payload: DeliveryLine[] = drafted.map(([itemId, d]) => ({
       itemId, qty: d.qty,
-      cost: d.cost.trim() === "" ? null : Number(d.cost),
+      cost: perBottleCost(d),
       caseSize: d.caseSize > 1 ? d.caseSize : null,
     }));
     const noun = `${totalBottles} bottles across ${drafted.length} item${drafted.length === 1 ? "" : "s"}`;
@@ -314,13 +331,19 @@ export function Delivery({
                         onChange={(e) => setLineCaseSize(id, Math.max(1, Math.floor(Number(e.target.value) || 1)))} />
                     </label>
                   )}
-                  <input type="number" inputMode="decimal" min="0" step="0.01"
-                    placeholder="$ / bottle"
-                    aria-label={`${it.name} unit price per bottle`}
-                    style={{ width: 86, textAlign: "right", padding: "6px 8px",
-                             background: "var(--surface-2)", border: "1px solid var(--line)",
-                             borderRadius: "var(--r-sm)", color: "var(--txt)", fontSize: 13 }}
-                    value={d.cost} onChange={(e) => setLineCost(id, e.target.value)} />
+                  <div className="dl-price">
+                    <input type="number" inputMode="decimal" min="0" step="0.01"
+                      placeholder={`$ / ${d.costPer}`}
+                      aria-label={`${it.name} price per ${d.costPer}`}
+                      value={d.cost} onChange={(e) => setLineCost(id, e.target.value)} />
+                    {isCase && (
+                      <button className="dl-per" onClick={() => toggleCostPer(id)}
+                        aria-label={`Switch to price per ${d.costPer === "bottle" ? "case" : "bottle"}`}
+                        title={`Switch to per ${d.costPer === "bottle" ? "case" : "bottle"}`}>
+                        / {d.costPer === "bottle" ? "btl" : "case"}
+                      </button>
+                    )}
+                  </div>
                   <button className="dl-x" onClick={() => setQty(id, 0)} aria-label={`Remove ${it.name}`}>×</button>
                 </div>
               );
