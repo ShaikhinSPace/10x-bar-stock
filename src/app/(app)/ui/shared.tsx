@@ -625,24 +625,21 @@ function BottleLevels({
 
   return (
     <div className="blv">
-      {levels.map((v, i) => (
-        <div className="blv-row" key={i}>
-          <span className="blv-n">Bottle {i + 1}</span>
-          <div className="blv-quick">
-            {[1, 0.75, 0.5, 0.25].map((q) => (
-              <button key={q} className={`blv-q${Number(v) === q ? " on" : ""}`}
-                aria-pressed={Number(v) === q}
-                onClick={() => set(i, String(q))}>
-                {q === 1 ? "Full" : q === 0.5 ? "½" : q === 0.75 ? "¾" : "¼"}
-              </button>
-            ))}
+      {levels.map((v, i) => {
+        const n = Math.round((Number(v) || 0) * 100) / 100;
+        return (
+          <div className="blv-row" key={i}>
+            <span className="blv-n">Bottle {i + 1}</span>
+            <input className="blv-slider" type="range" min="0" max="1" step="0.01"
+              aria-label={`Bottle ${i + 1} level`} value={n}
+              onChange={(e) => set(i, String(Math.round(Number(e.target.value) * 100) / 100))}
+              style={{ "--fill": `${n * 100}%` } as React.CSSProperties} />
+            <span className="blv-lbl">{n.toFixed(2)}</span>
+            <button className="blv-x" aria-label={`Remove bottle ${i + 1}`}
+              onClick={() => setLevels(levels.filter((_, x) => x !== i))}>×</button>
           </div>
-          <input className="blv-in" type="number" inputMode="decimal" min="0" max="1" step="0.05"
-            aria-label={`Bottle ${i + 1} level`} value={v} onChange={(e) => set(i, e.target.value)} />
-          <button className="blv-x" aria-label={`Remove bottle ${i + 1}`}
-            onClick={() => setLevels(levels.filter((_, x) => x !== i))}>×</button>
-        </div>
-      ))}
+        );
+      })}
       <div className="blv-foot">
         <button className="blv-add" onClick={() => setLevels([...levels, "1"])}>+ Add a bottle</button>
         <span className="blv-tot">
