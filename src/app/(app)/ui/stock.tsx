@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cap, fmt, fmtQty, inCat, levelsAt, needsReorder, noAlertSet, openLabel, stockAt, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { giveRun, submitStocktake, undoMove } from "../../actions";
-import { useAction, useLocations } from "../shell";
+import { useAction } from "../shell";
 import { BottleSheet } from "./bottle-sheet";
 import { DAY, LOC_ICON, locColor, rankIn, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
 
@@ -16,7 +16,7 @@ export function Stock({
 }: {
   items: Item[]; moves: Move[]; now: number; user: SessionUser; cats: Category[];
 }) {
-  const { slugs: LOCS, label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
+  const { slugs: LOCS, short: LOC_SHORT } = useLocMaps();
   const catRank = useMemo(() => rankIn(cats), [cats]);
   const nac = useMemo(() => noAlertSet(cats), [cats]);
   const [sheetId, setSheetId] = useState<number | null>(null);
@@ -222,7 +222,7 @@ export function RunMode({
 }: {
   items: Item[]; moves: Move[]; user: SessionUser;
 }) {
-  const { slugs: LOCS, label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
+  const { label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
   const { pending, run } = useAction();
   const router = useRouter();
   // For the owner this is one screen among many, so Escape and Done both go back to

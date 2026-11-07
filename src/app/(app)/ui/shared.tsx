@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { DEFAULT_SETTINGS, addBusinessDays, bizDayKey, catHue, fmt, stockAt, type Category, type Loc, type Item, type Settings } from "@/lib/model";
+import { DEFAULT_SETTINGS, addBusinessDays, bizDayKey, catHue, stockAt, type Category, type Loc, type Item, type Settings } from "@/lib/model";
 import { useLocations } from "../shell";
 
 export const DAY = 864e5;
