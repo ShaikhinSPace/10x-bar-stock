@@ -1781,8 +1781,8 @@ body:has(.app.solo) { padding-bottom: 24px; }
 .stk-slider input[type="range"]::-webkit-slider-runnable-track {
   height: 8px; background: var(--surface-2); border-radius: 4px; }
 .stk-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none;
-  width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
-  margin-top: -10px; border: 2px solid var(--bg); box-shadow: 0 1px 4px #0004; }
+  width: 28px; height: 28px; border-radius: 50%; background: var(--blue);
+  margin-top: -10px; border: none; box-shadow: none; }
 .stk-slider-val { font-size: 15px; font-weight: 700; color: var(--txt-1);
   min-width: 36px; text-align: right; }
 /* Empty state */
