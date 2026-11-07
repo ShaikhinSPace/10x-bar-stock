@@ -1771,11 +1771,16 @@ body:has(.app.solo) { padding-bottom: 24px; }
 @media (hover: hover) { .stk-rm:hover { color: var(--red); background: var(--surface-2); } }
 .stk-row .s-x { text-align: center; }
 /* Level slider */
-.stk-slider { display: flex; align-items: center; gap: 6px; width: 100%; }
-.stk-slider input[type="range"] { flex: 1; height: 6px; accent-color: var(--accent);
-  cursor: pointer; }
-.stk-slider-val { font-size: 13px; font-weight: 600; color: var(--txt-1);
-  min-width: 32px; text-align: right; }
+.stk-slider { display: flex; align-items: center; gap: 8px; width: 100%; }
+.stk-slider input[type="range"] { flex: 1; height: 36px; accent-color: var(--accent);
+  cursor: pointer; -webkit-appearance: none; appearance: none; background: transparent; }
+.stk-slider input[type="range"]::-webkit-slider-runnable-track {
+  height: 8px; background: var(--surface-2); border-radius: 4px; }
+.stk-slider input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none;
+  width: 28px; height: 28px; border-radius: 50%; background: var(--accent);
+  margin-top: -10px; border: 2px solid var(--bg); box-shadow: 0 1px 4px #0004; }
+.stk-slider-val { font-size: 15px; font-weight: 700; color: var(--txt-1);
+  min-width: 36px; text-align: right; }
 /* Empty state */
 .stk-empty { padding: 40px 20px; text-align: center; color: var(--txt-3); font-size: 14px;
   border: 1px dashed var(--line); border-radius: var(--r); margin-top: 10px; }
