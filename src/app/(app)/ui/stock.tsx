@@ -637,9 +637,9 @@ export function Stocktake({
                       <input
                         data-count-input
                         data-entry-item={item.id}
-                        type="range" min="0" max="1" step="0.25"
+                        type="range" min="0" max="1" step="0.01"
                         value={entry.value || "0.75"}
-                        onChange={e => updateValue(entry.key, e.target.value)}
+                        onChange={e => updateValue(entry.key, String(Math.round(Number(e.target.value) * 100) / 100))}
                       />
                       <span className="stk-slider-val">{entry.value || "0.75"}</span>
                     </span>
