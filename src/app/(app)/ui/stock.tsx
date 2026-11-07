@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { cap, fmt, fmtQty, inCat, levelsAt, needsReorder, noAlertSet, openLabel, stockAt, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
-import { giveRun, submitStocktake, undoMove } from "../../actions";
+import { giveRun, submitStocktake, undoMove, type Variance } from "../../actions";
 import { useAction } from "../shell";
 import { BottleSheet } from "./bottle-sheet";
 import { DAY, LOC_ICON, locColor, rankIn, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
@@ -345,149 +345,219 @@ export function RunMode({
   );
 }
 
-/* ============================ bulk count ============================ */
+/* ============================ blind count ============================ */
+
+type Entry = { key: number; itemId: number; value: string };
+type DraftLine = { itemId: number; value: string };
+let _ek = 0;
 
 /**
- * Count a whole location in one pass. There is no separate "stocktake" — the
- * manager counts open and close, and the variance falls out of the move log.
+ * Blind count: start empty, add bottles as you find them.
  *
- * Expected is shown and actual is typed beside it, because the variance between
- * them IS the leakage signal - hiding the expected figure would make the count
- * "purer" but throws away the number the owner actually needs.
+ * Store: one row per brand, type whole bottles.
+ * Bars:  one row per open bottle, type fill level. Add the same brand
+ *        again for each physical bottle on the bar.
  *
- * A blank row means "not counted" and is left completely alone. Only a typed value
- * counts, and only a typed value that differs from expected is written.
+ * Items NOT added are treated as absent (counted to zero). The server
+ * handles the zeroing — the client sends only what was counted; the
+ * server fills in zeroes for everything else at that location.
  */
 export function Stocktake({
   items, loc, user, cats, onClose, onFinish, step,
 }: {
   items: Item[]; loc: Loc; user: SessionUser; cats: Category[];
   onClose: () => void;
-  /** Called instead of onClose on a successful save, so a sweep can advance to the next loc. */
   onFinish?: () => void;
-  /** When part of a sweep: "1 of 3". Shown after the location name. */
   step?: string;
 }) {
-  const { label: LOC_LABEL, short: LOC_SHORT } = useLocMaps();
+  const { label: LOC_LABEL } = useLocMaps();
   const catRank = useMemo(() => rankIn(cats), [cats]);
-  const { pending, run } = useAction();
   useEscapeClose(onClose);
-  const draftKey = `stocktake:${loc}:${user.id}`;
+  const { say } = useAction();
+  const draftKey = `stocktake-v2:${loc}:${user.id}`;
+  const searchRef = useRef<HTMLInputElement>(null);
 
-  // A full count takes many minutes; losing it to a tab switch is unacceptable, so the
-  // draft is written locally on every keystroke and read back here. Reading it in the
-  // initialiser rather than an effect is safe because this only mounts after a click,
-  // never during SSR.
-  const [initial] = useState<Record<number, string>>(() => {
+  // Restore draft from localStorage
+  const [entries, setEntries] = useState<Entry[]>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(draftKey) ?? "{}");
-      return saved && typeof saved === "object" ? saved : {};
-    } catch {
-      return {}; // a corrupt draft is not worth blocking the count over
-    }
+      const saved: DraftLine[] = JSON.parse(localStorage.getItem(draftKey) ?? "[]");
+      if (!Array.isArray(saved) || !saved.length) return [];
+      return saved
+        .filter(d => items.some(i => i.id === d.itemId))
+        .map(d => ({ key: ++_ek, itemId: d.itemId, value: d.value }));
+    } catch { return []; }
   });
-  const [counts, setCounts] = useState<Record<string, string>>(initial);
-  const [q, setQ] = useState("");
-  const restored = Object.keys(initial).length > 0;
+  const [search, setSearch] = useState("");
+  const [report, setReport] = useState<Variance[] | null>(null);
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmZero, setConfirmZero] = useState(false);
+  // Prevent the Continue button's click from carrying over to Save count
+  const [ready, setReady] = useState(false);
+  useEffect(() => { const t = setTimeout(() => setReady(true), 200); return () => clearTimeout(t); }, []);
+  const restored = entries.length > 0 && !report;
 
+  // Persist draft
   useEffect(() => {
     try {
-      if (Object.keys(counts).length) localStorage.setItem(draftKey, JSON.stringify(counts));
+      const draft: DraftLine[] = entries.map(e => ({ itemId: e.itemId, value: e.value }));
+      if (draft.length) localStorage.setItem(draftKey, JSON.stringify(draft));
       else localStorage.removeItem(draftKey);
-    } catch { /* private mode / quota - the count still works, just isn't recoverable */ }
-  }, [counts, draftKey]);
+    } catch {}
+  }, [entries, draftKey]);
 
-  // One row per PHYSICAL bottle on bars — a brand with two open bottles gets two
-  // input rows. Store rows are always one-per-brand (sealed whole bottles). When a
-  // bar's per-bottle breakdown isn't recorded yet, split integer totals into N
-  // rows of 1 (likely sealed-just-delivered) and leave fractional totals as one.
-  const rows = useMemo(() => {
-    type Row = { item: Item; key: string; bottleIdx: number; bottleTotal: number; expected: number };
-    const sorted = [...items].sort(
+  // Non-archived items, sorted
+  const sortedItems = useMemo(
+    () => [...items].sort(
       (a, b) => catRank(a.cat) - catRank(b.cat) || a.name.localeCompare(b.name)
-    );
-    const out: Row[] = [];
-    for (const item of sorted) {
-      // Store, and anything case-sized (beer by default), is a single scalar row:
-      // "how many bottles are there?" — no half or quarter.
-      if (loc === "store" || item.case_size > 1) {
-        if (loc !== "store" && stockAt(item, loc) <= 0) continue;
-        out.push({ item, key: `${item.id}:0`, bottleIdx: 0, bottleTotal: 1, expected: stockAt(item, loc) });
-        continue;
-      }
-      const total = stockAt(item, loc);
-      if (total <= 0) continue;
-      const levels = levelsAt(item, loc).filter((n) => n > 0);
-      const breakdown = levels.length ? levels
-        : Number.isInteger(total) && total > 1 ? Array(total).fill(1)
-        : [total];
-      breakdown.forEach((lv, bi) => {
-        out.push({ item, key: `${item.id}:${bi}`, bottleIdx: bi, bottleTotal: breakdown.length, expected: lv });
-      });
+    ),
+    [items, catRank],
+  );
+
+  // Items in the entries (for store: exclude already-added)
+  const addedIds = useMemo(() => new Set(entries.map(e => e.itemId)), [entries]);
+
+  // Search results
+  const results = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    if (!needle) return [];
+    return sortedItems
+      .filter(i => i.name.toLowerCase().includes(needle))
+      .filter(i => loc === "store" ? !addedIds.has(i.id) : true)
+      .slice(0, 8);
+  }, [search, sortedItems, addedIds, loc]);
+
+  // Items with stock at this location that aren't in the count
+  const uncounted = useMemo(
+    () => sortedItems.filter(i => stockAt(i, loc) > 0 && !addedIds.has(i.id)),
+    [sortedItems, loc, addedIds],
+  );
+
+  // How many entries have a value typed
+  const filledCount = entries.filter(e => e.value.trim() !== "").length;
+  const blankCount = entries.length - filledCount;
+
+  function addItem(item: Item) {
+    // Store: if already added, focus that row
+    if (loc === "store" && addedIds.has(item.id)) {
+      const el = document.querySelector<HTMLInputElement>(`[data-entry-item="${item.id}"]`);
+      el?.focus(); el?.select();
+      setSearch("");
+      return;
     }
-    const needle = q.trim().toLowerCase();
-    return needle ? out.filter((r) => r.item.name.toLowerCase().includes(needle)) : out;
-  }, [items, loc, q, catRank]);
-
-  const filledRows = rows.reduce((n, r) => n + ((counts[r.key] ?? "").trim() ? 1 : 0), 0);
-
-  // Group filled rows by item, sum, compare to current scalar — a brand's variance is
-  // the sum of its bottles vs the stored total. A partially-filled brand (some bottle
-  // rows blank) is skipped: better than silently zeroing the missing bottles.
-  const perItem = useMemo(() => {
-    type Agg = { id: number; was: number; sum: number; filled: number; need: number };
-    const by = new Map<number, Agg>();
-    const need = new Map<number, number>();
-    for (const r of rows) need.set(r.item.id, (need.get(r.item.id) ?? 0) + 1);
-    for (const r of rows) {
-      const raw = counts[r.key] ?? "";
-      if (!raw.trim()) continue;
-      const v = Number(raw);
-      if (!Number.isFinite(v) || v < 0) continue;
-      const agg = by.get(r.item.id) ?? { id: r.item.id, was: stockAt(r.item, loc), sum: 0, filled: 0, need: need.get(r.item.id) ?? 1 };
-      agg.sum += v;
-      agg.filled += 1;
-      by.set(r.item.id, agg);
-    }
-    return [...by.values()];
-  }, [rows, counts, loc]);
-
-  const completeItems = perItem.filter((a) => a.filled === a.need);
-  const variances = completeItems.filter((a) => Math.abs(a.sum - a.was) > 1e-9);
-
-  function submit() {
-    if (!variances.length) return;
-    // Clear the draft and close ONLY on success — a failed submit must keep the
-    // count and its localStorage draft, or a multi-minute count is lost to a
-    // network blip. (Same success-gated pattern as RunMode.commit.)
-    run(
-      () => submitStocktake(loc, variances.map((a) => ({ itemId: a.id, value: a.sum }))),
-      `${LOC_SHORT[loc]} count saved — ${variances.length} correction${variances.length === 1 ? "" : "s"}`,
-      () => {
-        setCounts({});
-        try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
-        (onFinish ?? onClose)();
-      },
-    );
+    setEntries(prev => [...prev, { key: ++_ek, itemId: item.id, value: "" }]);
+    setSearch("");
+    setConfirmZero(false);
+    // Focus the new input after render
+    requestAnimationFrame(() => {
+      const inputs = document.querySelectorAll<HTMLInputElement>("[data-count-input]");
+      const last = inputs[inputs.length - 1];
+      last?.focus(); last?.select();
+    });
   }
 
-  // In a sweep, a "no changes" count still counts as done — the user walked the list
-  // and nothing was off. Advance to the next step without hitting the server.
-  function skipToNext() {
-    setCounts({});
-    try { localStorage.removeItem(draftKey); } catch { /* nothing to clean up */ }
-    (onFinish ?? onClose)();
+  function removeEntry(key: number) {
+    setEntries(prev => prev.filter(e => e.key !== key));
   }
 
-  /** Enter jumps to the next field so a count is one continuous run. */
-  function onKey(e: React.KeyboardEvent<HTMLInputElement>, idx: number) {
+  function updateValue(key: number, value: string) {
+    setEntries(prev => prev.map(e => e.key === key ? { ...e, value } : e));
+  }
+
+  function onSearchKey(e: React.KeyboardEvent) {
+    if (e.key === "Enter" && results.length) { e.preventDefault(); addItem(results[0]); }
+    if (e.key === "Escape") { setSearch(""); }
+  }
+
+  function onEntryKey(e: React.KeyboardEvent<HTMLInputElement>, idx: number) {
     if (e.key !== "Enter") return;
     e.preventDefault();
     const inputs = document.querySelectorAll<HTMLInputElement>("[data-count-input]");
-    inputs[idx + 1]?.focus();
-    inputs[idx + 1]?.select();
+    if (idx + 1 < inputs.length) { inputs[idx + 1]?.focus(); inputs[idx + 1]?.select(); }
+    else searchRef.current?.focus();
   }
 
+  async function submit() {
+    if (blankCount > 0) { say("Fill in all rows or remove the blank ones", true); return; }
+    if (!entries.length && !uncounted.length) { (onFinish ?? onClose)(); return; }
+    // Empty count with uncounted items = everything zeros. Require a confirm.
+    if (!entries.length && uncounted.length > 0 && !confirmZero) { setConfirmZero(true); return; }
+
+    setPending(true);
+    setError(null);
+    try {
+      const lines = entries
+        .filter(e => e.value.trim() !== "")
+        .map(e => ({ itemId: e.itemId, value: Number(e.value) }));
+      const result = await submitStocktake(loc, lines);
+      if (result.ok) {
+        setEntries([]);
+        try { localStorage.removeItem(draftKey); } catch {}
+        setReport(result.variances);
+      } else {
+        setError(result.error);
+        say(result.error, true);
+      }
+    } catch {
+      say("Something went wrong", true);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // --- Variance report ---
+  if (report !== null) {
+    const sorted = [...report].sort((a, b) => (a.counted - a.was) - (b.counted - b.was));
+    return (
+      <div className="stk">
+        <div className="stk-head">
+          <div>
+            <div className="ptitle" style={{ margin: 0 }}>
+              Count report <span className="sub">{LOC_LABEL[loc]}{step ? ` · ${step}` : ""}</span>
+            </div>
+            <div className="hint" style={{ marginTop: 4 }}>
+              {sorted.length
+                ? `${sorted.length} correction${sorted.length === 1 ? "" : "s"} recorded.`
+                : "Everything matched — no corrections needed."}
+            </div>
+          </div>
+        </div>
+        {sorted.length > 0 && (
+          <div className="stk-list">
+            <div className="stk-row stk-hdr">
+              <span className="s-n">Bottle</span>
+              <span className="s-e">Expected</span>
+              <span className="s-a">Counted</span>
+              <span className="s-v">Diff</span>
+            </div>
+            {sorted.map((v, i) => {
+              const diff = Math.round((v.counted - v.was) * 100) / 100;
+              return (
+                <div className={`stk-row has-var`} key={i}>
+                  <span className="s-n">
+                    <span className="nm">{v.name}</span>
+                    <span className="ct">{cap(v.cat)}</span>
+                  </span>
+                  <span className="s-e">{fmt(v.was)}</span>
+                  <span className="s-a">{fmt(v.counted)}</span>
+                  <span className={`s-v${diff > 0 ? " up" : " down"}`}>
+                    {diff > 0 ? "+" : ""}{fmt(diff)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        <div className="stk-foot">
+          <button className="commit" onClick={() => (onFinish ?? onClose)()}>
+            {onFinish ? "Continue" : "Done"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Blind count entry ---
   return (
     <div className="stk">
       <div className="stk-head">
@@ -496,7 +566,7 @@ export function Stocktake({
             Count <span className="sub">{LOC_LABEL[loc]}{step ? ` · ${step}` : ""}</span>
           </div>
           <div className="hint" style={{ marginTop: 4 }}>
-            Type what you actually count. Leave a row blank if you didn&apos;t count it.
+            Add bottles as you find them.{loc !== "store" ? " Add the same brand again for each open bottle." : ""}
           </div>
         </div>
         <button className="btn ghost" onClick={onClose}>Cancel</button>
@@ -504,87 +574,99 @@ export function Stocktake({
 
       {restored && (
         <div className="stk-restored">
-          Picked up an unfinished count — {filledRows} row{filledRows === 1 ? "" : "s"} restored.
+          Picked up an unfinished count — {entries.length} row{entries.length === 1 ? "" : "s"} restored.
         </div>
       )}
 
-      <div className="search">
+      <div className="search" style={{ position: "relative" }}>
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <circle cx="11" cy="11" r="7" /><path d="M21 21l-4-4" strokeLinecap="round" />
         </svg>
-        <input placeholder="Jump to a bottle…" value={q} onChange={(e) => setQ(e.target.value)} />
-        {q && <button className="clr" aria-label="Clear search" onClick={() => setQ("")}>×</button>}
+        <input
+          ref={searchRef}
+          placeholder="Search to add a bottle…"
+          value={search} onChange={e => setSearch(e.target.value)}
+          onKeyDown={onSearchKey}
+        />
+        {search && <button className="clr" aria-label="Clear search" onClick={() => setSearch("")}>×</button>}
+        {results.length > 0 && (
+          <div className="stk-results">
+            {results.map(item => (
+              <button key={item.id} className="stk-result" onClick={() => addItem(item)}>
+                <span className="nm">{item.name}</span>
+                <span className="ct">{cap(item.cat)}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
-      <div className="stk-list">
-        <div className="stk-row stk-hdr">
-          <span className="s-n">Bottle</span>
-          <span className="s-e">Expected</span>
-          <span className="s-a">Counted</span>
-          {/* Bars: usage since the previous count (expected = what we think was
-              on the bar, counted = what's there now, the gap is what got poured).
-              Store: a true variance (store only changes through logged moves, so
-              any gap is unlogged). Different column name, different colouring. */}
-          <span className="s-v">{loc === "store" ? "Variance" : "Used since last count"}</span>
+      {entries.length > 0 && (
+        <div className="stk-list">
+          <div className="stk-row stk-hdr">
+            <span className="s-n">Bottle</span>
+            <span className="s-a">{loc === "store" ? "Count" : "Level"}</span>
+            <span className="s-x">&nbsp;</span>
+          </div>
+          {entries.map((entry, idx) => {
+            const item = sortedItems.find(i => i.id === entry.itemId);
+            if (!item) return null;
+            const sameCount = entries.filter(e => e.itemId === entry.itemId).length;
+            const sameIdx = entries.filter((e, j) => e.itemId === entry.itemId && j <= idx).length;
+            const label = sameCount > 1
+              ? `${item.name} · bottle ${sameIdx} of ${sameCount}`
+              : item.name;
+            return (
+              <div className="stk-row" key={entry.key}>
+                <span className="s-n">
+                  <span className="nm">{label}</span>
+                  <span className="ct">{cap(item.cat)}</span>
+                </span>
+                <span className="s-a">
+                  <input
+                    data-count-input
+                    data-entry-item={item.id}
+                    type="number" inputMode="decimal" min="0"
+                    step={loc === "store" || item.case_size > 1 ? "1" : "0.05"}
+                    placeholder={loc === "store" || item.case_size > 1 ? "0" : "0.75"}
+                    value={entry.value}
+                    onKeyDown={e => onEntryKey(e, idx)}
+                    onChange={e => updateValue(entry.key, e.target.value)}
+                  />
+                </span>
+                <span className="s-x">
+                  <button className="stk-rm" aria-label="Remove" onClick={() => removeEntry(entry.key)}>×</button>
+                </span>
+              </div>
+            );
+          })}
         </div>
-        {rows.map((r, idx) => {
-          const raw = counts[r.key] ?? "";
-          const has = raw.trim() !== "";
-          const val = Number(raw);
-          const ok = has && Number.isFinite(val) && val >= 0;
-          const diff = ok ? Math.round((val - r.expected) * 100) / 100 : null;
-          const label = r.bottleTotal > 1
-            ? `${r.item.name} · bottle ${r.bottleIdx + 1} of ${r.bottleTotal}`
-            : r.item.name;
-          const expectedTxt = loc === "store"
-            ? fmtQty(r.item.cat, r.expected, r.item.case_size)
-            : r.item.case_size > 1 ? fmt(r.expected) : r.expected.toFixed(2);
-          // Only flag a variance on the STORE step. On bars the gap is usage,
-          // not an error — colouring it green/red would mislead.
-          const flagVariance = loc === "store" && ok && diff !== 0;
-          return (
-            <div className={`stk-row${flagVariance ? " has-var" : ""}`} key={r.key}>
-              <span className="s-n">
-                <span className="nm">{label}</span>
-                <span className="ct">{cap(r.item.cat)}</span>
-              </span>
-              <span className="s-e">{expectedTxt}</span>
-              <span className="s-a">
-                <input
-                  data-count-input type="number" inputMode="decimal" min="0"
-                  step={loc === "store" || r.item.case_size > 1 ? "1" : "0.05"}
-                  placeholder={loc === "store" || r.item.case_size > 1 ? "—" : "0.75"} value={raw}
-                  onKeyDown={(e) => onKey(e, idx)}
-                  onChange={(e) => setCounts((c) => ({ ...c, [r.key]: e.target.value }))}
-                />
-              </span>
-              {/* Store gets red/green on the gap (true variance). Bar cells stay
-                  neutral — the gap there is usage, not an error. */}
-              <span className={`s-v${diff === null ? "" : diff === 0 ? " same" : loc === "store" ? (diff > 0 ? " up" : " down") : ""}`}>
-                {diff === null ? "" : diff === 0 ? "✓" : `${diff > 0 ? "+" : ""}${fmt(diff)}`}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      )}
+
+      {!entries.length && (
+        <div className="stk-empty">
+          Search above to start adding bottles.
+        </div>
+      )}
 
       <div className="stk-foot">
         <div className="stk-sum">
-          <b>{filledRows}</b> of {rows.length} counted
-          {variances.length > 0 && <span className="vwarn"> · {variances.length} variance{variances.length === 1 ? "" : "s"}</span>}
+          <b>{filledCount}</b> bottle{filledCount === 1 ? "" : "s"} counted
+          {blankCount > 0 && <span className="vwarn"> · {blankCount} blank</span>}
         </div>
-        {/* In a sweep, "no changes" is a valid outcome — advance without a server round-trip.
-            Standalone, the button stays disabled until the user actually has corrections. */}
-        {onFinish && !variances.length ? (
-          <button className="commit ghost" disabled={pending} onClick={skipToNext}>
-            No changes — continue
+        {uncounted.length > 0 && (
+          <div className="stk-warn">
+            {uncounted.length} bottle{uncounted.length === 1 ? "" : "s"} at {LOC_LABEL[loc]} not in your count — will be set to 0
+          </div>
+        )}
+        {error && <div className="stk-warn" style={{ color: "var(--red)" }}>{error}</div>}
+        {!entries.length && !uncounted.length && onFinish ? (
+          <button className="commit ghost" onClick={() => (onFinish ?? onClose)()}>
+            Nothing here — continue
           </button>
         ) : (
-          <button className="commit" disabled={pending || !variances.length} onClick={submit}>
-            {pending ? "Saving…"
-              : variances.length
-                ? (onFinish ? `Save & continue (${variances.length})` : `Save ${variances.length} correction${variances.length === 1 ? "" : "s"}`)
-                : "No changes to save"}
+          <button className="commit" disabled={!ready || pending || (blankCount > 0) || (!entries.length && !uncounted.length)} onClick={submit}>
+            {pending ? "Saving…" : confirmZero ? `Yes, zero ${uncounted.length} bottle${uncounted.length === 1 ? "" : "s"}` : "Save count"}
           </button>
         )}
       </div>

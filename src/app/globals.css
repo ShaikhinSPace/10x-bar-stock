@@ -1722,24 +1722,17 @@ body:has(.app.solo) { padding-bottom: 24px; }
 
 .stk-list { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden;
   background: var(--surface); margin-top: 10px; }
-/* 62px fits the numbers but not the header labels - "Expected" needs 74px
-   and "Variance" 72px at this size, so they used to spill into the next
-   column and read as "EXPECTEDCOUNTED". The name column has hundreds of
-   spare pixels, so the numeric columns simply get enough room. */
-.stk-row { display: grid; grid-template-columns: 1fr 84px 92px 84px; align-items: center;
+/* Entry mode: name + value + remove button */
+.stk-row { display: grid; grid-template-columns: 1fr 92px 32px; align-items: center;
   gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .stk-row:last-child { border-bottom: none; }
-.stk-row.has-var { background: var(--amber-glow); }
-/* 9px/.02em, not 10px/.07em: the wide tracking pushed "EXPECTED" to 74px and
-   "VARIANCE" to 72px, well past their columns, so the labels collided into
-   "EXPECTEDCOUNTED" and VARIANCE ran off the edge. */
+.stk-row.has-var { background: var(--amber-glow);
+  grid-template-columns: 1fr 84px 84px 84px; }
 .stk-hdr { position: sticky; top: 0; z-index: 2; background: var(--surface-2);
   font-size: 9px; font-weight: 700; letter-spacing: .02em; text-transform: uppercase;
   color: var(--txt-3); }
-/* The header reuses the value cells, which carry their own 13px - so EXPECTED
-   and VARIANCE rendered bigger than COUNTED and needed far more room than the
-   header's own size implies. Labels follow the header, values keep 13px.
-   Doubled up as .stk-row.stk-hdr to outrank ".stk-row .s-e" below it. */
+/* Report header uses 4-col layout */
+.stk-row.stk-hdr:has(.s-v) { grid-template-columns: 1fr 84px 84px 84px; }
 .stk-row.stk-hdr .s-e, .stk-row.stk-hdr .s-v { font-size: inherit; font-weight: inherit; }
 .stk-row .s-n { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .stk-row .s-n .nm { font-size: 13.5px; font-weight: 500; white-space: nowrap;
@@ -1760,6 +1753,29 @@ body:has(.app.solo) { padding-bottom: 24px; }
 .stk-row .s-v.down { color: var(--red); }
 .stk-row .s-v.same { color: var(--txt-3); font-weight: 500; }
 
+/* Search results dropdown */
+.stk-results { position: absolute; top: 100%; left: 0; right: 0; z-index: 10;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r);
+  margin-top: 4px; overflow: hidden; box-shadow: 0 4px 16px rgba(0,0,0,.15); }
+.stk-result { display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 10px 14px; border: none; background: none; color: var(--txt); cursor: pointer;
+  text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; }
+.stk-result:last-child { border-bottom: none; }
+@media (hover: hover) { .stk-result:hover { background: var(--surface-2); } }
+.stk-result .nm { font-weight: 500; }
+.stk-result .ct { font-size: 10px; color: var(--txt-3); text-transform: uppercase;
+  letter-spacing: .05em; margin-left: auto; }
+/* Remove button on entry rows */
+.stk-rm { background: none; border: none; color: var(--txt-3); cursor: pointer;
+  font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
+@media (hover: hover) { .stk-rm:hover { color: var(--red); background: var(--surface-2); } }
+.stk-row .s-x { text-align: center; }
+/* Empty state */
+.stk-empty { padding: 40px 20px; text-align: center; color: var(--txt-3); font-size: 14px;
+  border: 1px dashed var(--line); border-radius: var(--r); margin-top: 10px; }
+/* Warning banner (uncounted items) */
+.stk-warn { width: 100%; font-size: 12.5px; color: var(--amber); font-weight: 500; }
+
 .stk-foot { position: sticky; bottom: 0; display: flex; align-items: center; gap: 12px;
   flex-wrap: wrap; background: var(--surface); border: 1px solid var(--line);
   border-radius: var(--r); padding: 12px 14px; margin-top: 12px; }
@@ -1769,9 +1785,9 @@ body:has(.app.solo) { padding-bottom: 24px; }
 .stk-foot .commit { width: auto; flex: none; padding: 13px 22px; font-size: 15px; }
 
 @media (max-width: 620px) {
-  /* 48/52 couldn't hold the header labels even at the smaller type - the
-     name column has room to spare, so the numeric ones take what they need. */
-  .stk-row { grid-template-columns: 1fr 68px 76px 68px; gap: 6px; padding: 8px 9px; }
+  .stk-row { grid-template-columns: 1fr 76px 32px; gap: 6px; padding: 8px 9px; }
+  .stk-row.has-var { grid-template-columns: 1fr 68px 68px 68px; }
+  .stk-row.stk-hdr:has(.s-v) { grid-template-columns: 1fr 68px 68px 68px; }
   .stk-row .s-a input { padding: 8px 6px; font-size: 14px; }
   .stk-foot .commit { width: 100%; }
 }

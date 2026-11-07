@@ -3,43 +3,61 @@
 import { refresh } from "next/cache";
 import { sql, type Loc } from "@/lib/db";
 import { requireOwner } from "@/lib/auth";
-import { attempt, partial, isLoc, knownLocs, type Result } from "./_shared";
+import { partial, isLoc, knownLocs } from "./_shared";
 
-// Every export here is reachable by direct POST, so each one re-checks auth itself.
+export type Variance = { name: string; cat: string; was: number; counted: number };
+export type StocktakeResult =
+  | { ok: true; variances: Variance[] }
+  | { ok: false; error: string };
 
 /**
- * Submit a whole count for one location in a single statement.
+ * Submit a blind count for one location.
  *
- * There is no separate "stocktake" — the manager counts open and close, the
- * system takes the difference. Counting bottle-by-bottle through the item sheet
- * is six interactions per bottle across ~45 bottles, which is how counts end up
- * not happening. Here the counter walks the list once and submits.
+ * The caller sends one line per physical bottle found:
+ *  - Store: one line per brand (value = whole bottles).
+ *  - Bars:  one line per open bottle (value = fill level). Multiple lines
+ *           for the same item are summed and the individual values become
+ *           the levels array.
  *
- * Only rows whose count actually moved are written: a no-change row updates nothing
- * and logs nothing, so a `count` entry in the log always means something shifted.
- * Rows the counter never filled in are simply absent - a blank is "not counted",
- * never zero.
+ * Items at this location that are NOT in the list are treated as absent
+ * (counted to zero). This is a true "count from zero" — you build the
+ * list from what's physically there.
  */
 export async function submitStocktake(
   loc: Loc, lines: { itemId: number; value: number }[]
-): Promise<Result> {
-  return attempt(async () => {
+): Promise<StocktakeResult> {
+  try {
     const u = await requireOwner();
     const locs = await knownLocs();
     if (!isLoc(loc, locs)) throw new Error("Unknown location");
-    if (!Array.isArray(lines) || !lines.length) throw new Error("Nothing counted yet");
-    if (lines.length > 1000) throw new Error("That's too many lines for one count");
+    if (lines.length > 2000) throw new Error("Too many lines for one count");
 
-    const seen = new Map<number, number>();
+    // Group by item: sum values, collect individual values as bar levels
+    const byItem = new Map<number, { total: number; levels: number[] }>();
     for (const l of lines) {
       const id = Number(l.itemId);
       if (!Number.isInteger(id)) throw new Error("Unknown bottle in the count");
-      seen.set(id, partial(l.value, "Count")); // bars are counted to 2dp
+      const v = partial(l.value, "Count");
+      const prev = byItem.get(id);
+      if (prev) { prev.total += v; prev.levels.push(v); }
+      else byItem.set(id, { total: v, levels: [v] });
+    }
+    for (const v of byItem.values()) v.total = Math.round(v.total * 100) / 100;
 
+    // Items at this location with stock > 0 that the user did NOT count → zero
+    const existing = await sql`
+      select id from items where not archived and
+        case ${loc}::text when 'store' then store when 'patio' then patio else back end > 0`;
+    for (const r of existing) {
+      const id = r.id as number;
+      if (!byItem.has(id)) byItem.set(id, { total: 0, levels: [] });
     }
 
-    const ids = [...seen.keys()];
-    const vals = [...seen.values()];
+    const ids = [...byItem.keys()];
+    const vals = [...byItem.values()].map(v => v.total);
+
+    if (!ids.length) return { ok: true, variances: [] };
+
     const batch = `S${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
     const rows = await sql`
@@ -59,8 +77,6 @@ export async function submitStocktake(
           store = case when ${loc}::text = 'store' then c.val else i.store end,
           patio = case when ${loc}::text = 'patio' then c.val else i.patio end,
           back  = case when ${loc}::text = 'back'  then c.val else i.back  end,
-          -- A stocktake row is one total per bottle, not a bottle-by-bottle
-          -- breakdown, so it replaces any breakdown with "unknown".
           patio_levels = case when ${loc}::text = 'patio' then '{}'::numeric[] else i.patio_levels end,
           back_levels  = case when ${loc}::text = 'back'  then '{}'::numeric[] else i.back_levels  end
         from changed c where i.id = c.id
@@ -70,9 +86,32 @@ export async function submitStocktake(
         (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, batch)
       select 'count', c.id, c.name, c.cat, ${loc}::text, c.was, c.val, ${u.id}, ${u.name}, ${batch}
       from changed c join upd on upd.id = c.id
-      returning id`;
+      returning item_name as name, cat, from_val::numeric as was, to_val::numeric as counted`;
 
-    if (!rows.length) throw new Error("Every count matched what was already recorded.");
+    // Write per-bottle levels for bar counts (after CTE cleared them)
+    if (loc !== "store") {
+      for (const [id, v] of byItem) {
+        const clean = v.levels.filter(n => n > 0);
+        if (!clean.length) continue;
+        await sql`update items set
+          patio_levels = case when ${loc}::text = 'patio' then ${clean}::numeric[] else patio_levels end,
+          back_levels  = case when ${loc}::text = 'back'  then ${clean}::numeric[] else back_levels  end
+        where id = ${id}`;
+      }
+    }
+
     refresh();
-  });
+    return {
+      ok: true,
+      variances: rows.map(r => ({
+        name: r.name as string,
+        cat: r.cat as string,
+        was: Number(r.was),
+        counted: Number(r.counted),
+      })),
+    };
+  } catch (e) {
+    console.error("[action]", e);
+    return { ok: false, error: e instanceof Error ? e.message : "Something went wrong" };
+  }
 }

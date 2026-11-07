@@ -63,14 +63,16 @@ Two roles, set when the user is created. Gates are enforced server-side
 2. The **Today strip** shows: given out, deliveries, poured, wasted.
    Below it: when each location was last counted.
 3. Tap **Count today →** to run the chained sweep: Patio → Back →
-   Store, with a progress indicator. Each step:
-   - Bars: type the fill level of each open bottle. The "Used since
-     last count" column shows what got poured (neutral — not an error).
-   - Store: type whole bottles. Beer shows cases + loose bottles
-     (e.g. 2 cases + 7 loose = 55 bottles). The "Variance" column
-     shows green/red for any gap vs. what the system expected.
-   - **Save & continue** saves and advances. **No changes — continue**
-     skips without saving. **Cancel** exits; saved steps stay saved.
+   Store, with a progress indicator. Each step starts with an empty
+   list — add bottles as you physically find them:
+   - Search / tap to add a bottle to the count.
+   - Bars: each add is one physical bottle. Type its fill level
+     (0.25, 0.5, 0.75, 1.00). Multiple opens of the same brand =
+     add it multiple times.
+   - Store: each add is one brand. Type whole bottles.
+   - A bottle you don't add counts as zero (it's not on the shelf).
+   - **Save & continue** saves, shows a variance report, and
+     advances. **Cancel** exits; saved steps stay saved.
 4. Check the **Reorder table** — anything flagged OUT or LOW needs
    ordering.
 
