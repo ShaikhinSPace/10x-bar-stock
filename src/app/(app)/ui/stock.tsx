@@ -6,7 +6,8 @@ import { useRouter } from "next/navigation";
 import { cap, fmt, fmtQty, inCat, levelsAt, needsReorder, noAlertSet, openLabel, stockAt, undoableMoveIds, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { giveRun, submitStocktake, undoMove } from "../../actions";
 import { useAction, useLocations } from "../shell";
-import { BottleSheet, DAY, LOC_ICON, locColor, rankIn, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
+import { BottleSheet } from "./bottle-sheet";
+import { DAY, LOC_ICON, locColor, rankIn, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
 
 /* ============================ stock ============================ */
 

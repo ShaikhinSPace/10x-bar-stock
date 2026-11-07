@@ -5,7 +5,8 @@ import { useState } from "react";
 import { bizDayKey, cap, fmt, fmtQty, needsReorder, noAlertSet, stockAt, type Cat, type Category, type Item, type Loc, type Move, type SessionUser } from "@/lib/model";
 import { setReorderIgnore } from "../../actions";
 import { useAction, useSettings } from "../shell";
-import { BottleSheet, DAY, catBarColor, dayKey, last7, locColor, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
+import { BottleSheet } from "./bottle-sheet";
+import { DAY, catBarColor, dayKey, last7, locColor, sumAt, timeStr, useEscapeClose, useLocMaps } from "./shared";
 import { Stocktake } from "./stock";
 
 export function Dashboard({
