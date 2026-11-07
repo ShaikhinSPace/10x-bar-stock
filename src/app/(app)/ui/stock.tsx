@@ -446,7 +446,8 @@ export function Stocktake({
       setSearch("");
       return;
     }
-    setEntries(prev => [...prev, { key: ++_ek, itemId: item.id, value: "" }]);
+    const defaultVal = loc !== "store" && item.case_size <= 1 ? "0.75" : "";
+    setEntries(prev => [...prev, { key: ++_ek, itemId: item.id, value: defaultVal }]);
     setSearch("");
     setConfirmZero(false);
     // Focus the new input after render
@@ -631,16 +632,29 @@ export function Stocktake({
                   <span className="ct">{cap(item.cat)}</span>
                 </span>
                 <span className="s-a">
-                  <input
-                    data-count-input
-                    data-entry-item={item.id}
-                    type="number" inputMode="decimal" min="0"
-                    step={loc === "store" || item.case_size > 1 ? "1" : "0.05"}
-                    placeholder={loc === "store" || item.case_size > 1 ? "0" : "0.75"}
-                    value={entry.value}
-                    onKeyDown={e => onEntryKey(e, idx)}
-                    onChange={e => updateValue(entry.key, e.target.value)}
-                  />
+                  {loc !== "store" && item.case_size <= 1 ? (
+                    <span className="stk-slider">
+                      <input
+                        data-count-input
+                        data-entry-item={item.id}
+                        type="range" min="0" max="1" step="0.25"
+                        value={entry.value || "0.75"}
+                        onChange={e => updateValue(entry.key, e.target.value)}
+                      />
+                      <span className="stk-slider-val">{entry.value || "0.75"}</span>
+                    </span>
+                  ) : (
+                    <input
+                      data-count-input
+                      data-entry-item={item.id}
+                      type="number" inputMode="decimal" min="0"
+                      step={loc === "store" || item.case_size > 1 ? "1" : "0.05"}
+                      placeholder="0"
+                      value={entry.value}
+                      onKeyDown={e => onEntryKey(e, idx)}
+                      onChange={e => updateValue(entry.key, e.target.value)}
+                    />
+                  )}
                 </span>
                 <span className="s-x">
                   <button className="stk-rm" aria-label="Remove" onClick={() => removeEntry(entry.key)}>×</button>

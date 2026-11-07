@@ -1770,6 +1770,12 @@ body:has(.app.solo) { padding-bottom: 24px; }
   font-size: 18px; line-height: 1; padding: 2px 4px; border-radius: 6px; }
 @media (hover: hover) { .stk-rm:hover { color: var(--red); background: var(--surface-2); } }
 .stk-row .s-x { text-align: center; }
+/* Level slider */
+.stk-slider { display: flex; align-items: center; gap: 6px; width: 100%; }
+.stk-slider input[type="range"] { flex: 1; height: 6px; accent-color: var(--accent);
+  cursor: pointer; }
+.stk-slider-val { font-size: 13px; font-weight: 600; color: var(--txt-1);
+  min-width: 32px; text-align: right; }
 /* Empty state */
 .stk-empty { padding: 40px 20px; text-align: center; color: var(--txt-3); font-size: 14px;
   border: 1px dashed var(--line); border-radius: var(--r); margin-top: 10px; }
