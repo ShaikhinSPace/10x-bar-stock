@@ -108,45 +108,16 @@ node --env-file=.env.local --experimental-strip-types scripts/check-report.mjs
 
 ## Roles
 
-| | Give out / Receive / Count | Undo own entry | Manage bottles, staff & reports |
-|---|---|---|---|
-| **staff** | yes (incl. deliveries) | yes | no |
-| **owner** | yes (incl. deliveries) | any entry | yes |
+| | Give / Receive / Transfer / Waste | Count | Deliveries | Undo | Manage |
+|---|---|---|---|---|---|
+| **staff** | yes (bar waste only) | no | no | own entries | no |
+| **owner** | yes (incl. store waste) | yes | yes | any entry | yes |
 
 Only the newest entry for a bottle can be undone — reversing an older one would
 clobber whatever was logged after it. Correct an older mistake with a **Count**.
 
-## Where the data came from
+## Documentation
 
-`src/lib/seed-items.json` is generated from the workbook's `Inventory` sheet
-(the *Current Stock* column, which nets opening + in − out), plus five SKUs that
-only ever appeared on the bar sheets:
-
-`TAAKA`, `KENTUCKY GENTLEMAN`, `BLUE ICE`, `BARTON NATURALS`, `CALYPSO SILVER` —
-seeded at store 0, since the storeroom is simply out of them.
-
-Three bar-sheet names were merged as misspellings of storeroom items:
-`JAGERMEISTER`→`JAEGERMEISTER`, `SCREWBALL`→`SKREWBALL`, `BUCANA`→`BUCHANAN`.
-
-Bars start at zero. Staff enter real bar counts with the **Count** action.
-
-## Known gaps
-
-- **Reorder levels are still estimates.** The workbook left the column blank for all
-  119 items. Seeded at one case (24) for beer and 1 for everything else, which gives
-  28 day-one alerts (15 of them genuinely at zero) rather than the 55 that a blanket
-  rl=2 produced. Editable per item in Manage — worth confirming with the owner.
-- **Mixers raise no reorder alerts.** Juices, syrups, salt and Tajin are consumables,
-  not leakage risks, and were 11 of the original 55 alerts. They still show OUT on the
-  Stock tab, but never appear in the dashboard alert list or the "Need reorder" count.
-  Change `NO_REORDER_ALERTS` in `src/lib/model.ts` to undo this.
-- **Two bar SKUs were left out**: the bar sheets list a bare `CASAMIGOS` and a bare
-  `DON JULIO`, but the storeroom carries two Casamigos and five Don Julio variants.
-  Rather than guess a merge, neither was added — add them in Manage if the bars
-  genuinely hold an unlabelled bottle.
-- **The bar sheets double-counted.** Rows 35–45 of `Patio Bar` are identical to rows
-  37–47 of `Back Bar`, and 8 of those 11 already appear higher up the Patio sheet.
-  Since bars start at zero, none of it was imported — but it is worth knowing the
-  old bar numbers were unreliable.
-- **No "reset all".** The old single-file version had one. Against a shared database
-  with a real audit trail, it is a footgun; archive bottles in Manage instead.
+See **[docs/APP.md](docs/APP.md)** for the full reference: how to use the
+app (by role, daily workflows, each tab), the data model, every server
+action, and the code map.
