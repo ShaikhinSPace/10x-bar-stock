@@ -626,7 +626,7 @@ export function Stocktake({
               ? `${item.name} · bottle ${sameIdx} of ${sameCount}`
               : item.name;
             return (
-              <div className="stk-row" key={entry.key}>
+              <div className={`stk-row${loc !== "store" && item.case_size <= 1 ? " has-slider" : ""}`} key={entry.key}>
                 <span className="s-n">
                   <span className="nm">{label}</span>
                   <span className="ct">{cap(item.cat)}</span>

@@ -1726,6 +1726,10 @@ body:has(.app.solo) { padding-bottom: 24px; }
 .stk-row { display: grid; grid-template-columns: 1fr 92px 32px; align-items: center;
   gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
 .stk-row:last-child { border-bottom: none; }
+.stk-row.has-slider { grid-template-columns: 1fr 32px; grid-template-rows: auto auto; }
+.stk-row.has-slider .s-n { grid-column: 1; }
+.stk-row.has-slider .s-x { grid-column: 2; grid-row: 1; }
+.stk-row.has-slider .s-a { grid-column: 1 / -1; grid-row: 2; }
 .stk-row.has-var { background: var(--amber-glow);
   grid-template-columns: 1fr 84px 84px 84px; }
 .stk-hdr { position: sticky; top: 0; z-index: 2; background: var(--surface-2);
