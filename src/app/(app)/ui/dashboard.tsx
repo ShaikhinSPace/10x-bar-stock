@@ -35,6 +35,7 @@ export function Dashboard({
         step={`${sweepStep + 1} of ${SWEEP.length}`}
         onClose={() => setSweepStep(null)}
         onFinish={() => setSweepStep(sweepStep + 1 < SWEEP.length ? sweepStep + 1 : null)}
+        onSwitchLoc={(to) => setSweepStep(SWEEP.indexOf(to))}
       />
     );
   }

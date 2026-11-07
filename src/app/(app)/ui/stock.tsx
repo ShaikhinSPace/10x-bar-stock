@@ -363,12 +363,13 @@ let _ek = 0;
  * server fills in zeroes for everything else at that location.
  */
 export function Stocktake({
-  items, loc, user, cats, onClose, onFinish, step,
+  items, loc, user, cats, onClose, onFinish, step, onSwitchLoc,
 }: {
   items: Item[]; loc: Loc; user: SessionUser; cats: Category[];
   onClose: () => void;
   onFinish?: () => void;
   step?: string;
+  onSwitchLoc?: (to: Loc) => void;
 }) {
   const { label: LOC_LABEL } = useLocMaps();
   const catRank = useMemo(() => rankIn(cats), [cats]);
@@ -569,7 +570,14 @@ export function Stocktake({
             Add bottles as you find them.{loc !== "store" ? " Add the same brand again for each open bottle." : ""}
           </div>
         </div>
-        <button className="btn ghost" onClick={onClose}>Cancel</button>
+        <div style={{ display: "flex", gap: 8 }}>
+          {onSwitchLoc && loc !== "store" && (
+            <button className="btn ghost" onClick={() => onSwitchLoc(loc === "patio" ? "back" : "patio")}>
+              → {loc === "patio" ? "Back Bar" : "Patio"}
+            </button>
+          )}
+          <button className="btn ghost" onClick={onClose}>Cancel</button>
+        </div>
       </div>
 
       {restored && (
