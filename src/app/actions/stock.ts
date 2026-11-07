@@ -3,6 +3,7 @@
 import { refresh } from "next/cache";
 import { sql, type Loc } from "@/lib/db";
 import { applyGiveRun } from "@/lib/give-run";
+import { applyGive, applyReceive, applyStoreCount, logMoveOnly } from "@/lib/stock-move";
 import { applyUndo } from "@/lib/undo-move";
 import { requireOwner, requireUser } from "@/lib/auth";
 import { attempt, whole, partial, isLoc, knownLocs, type Result } from "./_shared";
@@ -25,35 +26,9 @@ export async function giveOut(itemId: number, qty: number, to: Loc | null): Prom
     if (q < 1) throw new Error("Give out at least 1 bottle");
     if (to !== null && (!isLoc(to, locs) || to === "store")) throw new Error("Give to a bar, or leave the bar unknown");
 
-    const rows = await sql`
-      with prev as (
-        select id, name, cat from items where id = ${itemId} and not archived
-      ), upd as (
-        update items set
-          store = store - ${q},
-          patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
-          back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-          -- Whole unopened bottles, so they join the breakdown as full ones -
-          -- but only where a breakdown already exists, or its sum would stop
-          -- matching the total. Empty stays empty until someone counts.
-          -- The ::int cast below is load-bearing: a bound parameter arrives
-          -- as text, so without it this is array_fill(numeric, text[]) and
-          -- fails at runtime. (Never interpolate into a SQL comment either -
-          -- the driver still binds it, leaving a parameter nothing uses.)
-          patio_levels = case when ${to}::text = 'patio' and cardinality(patio_levels) > 0
-                              then patio_levels || array_fill(1::numeric, array[${q}::int])
-                              else patio_levels end,
-          back_levels  = case when ${to}::text = 'back'  and cardinality(back_levels) > 0
-                              then back_levels  || array_fill(1::numeric, array[${q}::int])
-                              else back_levels end
-        where id = ${itemId} and not archived and store >= ${q}
-        returning id
-      )
-      insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name)
-      select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}
-      from prev join upd on upd.id = prev.id
-      returning id`;
-
+    const rows = await applyGive(sql, {
+      itemId, qty: q, to, userId: u.id, userName: u.name, extendLevels: true,
+    });
     if (!rows.length) throw new Error("Not enough in the storeroom — receive stock first.");
     refresh();
   });
@@ -129,23 +104,7 @@ export async function receive(itemId: number, qty: number, loc: Loc = "store"): 
     if (q < 1) throw new Error("Receive at least 1 bottle");
     if (!isLoc(loc, locs)) throw new Error("Pick where it's received");
 
-    const rows = await sql`
-      with prev as (
-        select id, name, cat from items where id = ${itemId} and not archived
-      ), upd as (
-        update items set
-          store = store + case when ${loc}::text = 'store' then ${q}::numeric else 0 end,
-          patio = patio + case when ${loc}::text = 'patio' then ${q}::numeric else 0 end,
-          back  = back  + case when ${loc}::text = 'back'  then ${q}::numeric else 0 end,
-          patio_levels = case when ${loc}::text = 'patio' then '{}'::numeric[] else patio_levels end,
-          back_levels  = case when ${loc}::text = 'back'  then '{}'::numeric[] else back_levels  end
-        where id = ${itemId} and not archived returning id
-      )
-      insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name)
-      select 'receive', prev.id, prev.name, prev.cat, ${q}, ${loc}::text, ${u.id}, ${u.name}
-      from prev join upd on upd.id = prev.id
-      returning id`;
-
+    const rows = await applyReceive(sql, { itemId, qty: q, loc, userId: u.id, userName: u.name });
     if (!rows.length) throw new Error("That bottle is no longer in the list.");
     refresh();
   });
@@ -211,16 +170,7 @@ export async function countStore(itemId: number, value: number): Promise<Result>
   return attempt(async () => {
     const u = await requireOwner();
     const v = whole(value, "Counted amount");
-    const rows = await sql`
-      with prev as (
-        select id, name, cat, store as v from items where id = ${itemId} and not archived
-      ), upd as (
-        update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
-      )
-      insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name)
-      select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}
-      from prev join upd on upd.id = prev.id
-      returning id`;
+    const rows = await applyStoreCount(sql, { itemId, value: v, userId: u.id, userName: u.name });
     if (!rows.length) throw new Error("That bottle is no longer in the list.");
     refresh();
   });
@@ -391,102 +341,31 @@ export async function addEntry(
     const latestCountTs = latest?.ts ? new Date(latest.ts as string).getTime() : 0;
     const skipStock = latestCountTs > 0 && atMs <= latestCountTs;
 
+    let rows: Record<string, unknown>[];
+    const base = { itemId, userId: u.id, userName: u.name, ts: tsIso };
+
     if (type === "receive") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
-      // Receive into the storeroom (a delivery) or straight onto a bar. Whole bottles;
-      // a bar receive drops that bar's open-bottle breakdown since the new bottles'
-      // composition isn't known (same as a backdated give).
       if (!isLoc(to, locs)) throw new Error("Pick where it's received");
-      if (skipStock) {
-        const rows = await sql`
-          with prev as (select id, name, cat from items where id = ${itemId} and not archived)
-          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-          select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
-          from prev returning id`;
-        if (!rows.length) throw new Error("That bottle is no longer in the list.");
-      } else {
-        const rows = await sql`
-          with prev as (
-            select id, name, cat from items where id = ${itemId} and not archived
-          ), upd as (
-            update items set
-              store = store + case when ${to}::text = 'store' then ${q}::numeric else 0 end,
-              patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
-              back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-              patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
-              back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
-            where id = ${itemId} and not archived returning id
-          )
-          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-          select 'receive', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
-          from prev join upd on upd.id = prev.id returning id`;
-        if (!rows.length) throw new Error("That bottle is no longer in the list.");
-      }
+      rows = skipStock
+        ? await logMoveOnly(sql, { type: "receive", itemId, qty: q, loc: to, userId: u.id, userName: u.name, ts: tsIso })
+        : await applyReceive(sql, { ...base, qty: q, loc: to! });
+      if (!rows.length) throw new Error("That bottle is no longer in the list.");
     } else if (type === "give") {
       const q = whole(qty, "Quantity");
       if (q < 1) throw new Error("Add at least 1 bottle");
-      // `to` is a bar, OR null for a give whose bar you don't remember. Either way the
-      // bottles left the storeroom (store drops, and it's a 'give' so it counts as given
-      // out); an unknown give just isn't credited to a specific bar — a later bar count
-      // absorbs it. A backdated/unknown give can't know a bar's open-bottle composition,
-      // so it drops that bar's breakdown rather than inventing full bottles.
-      // Strict null (not loose !=): a stray undefined from a direct POST shouldn't silently
-      // land as an "unknown bar" give — reject it like any other invalid loc value.
       if (!(to === null || (isLoc(to, locs) && to !== "store"))) throw new Error("Give to a bar, or leave the bar unknown");
-      if (skipStock) {
-        // No store >= q guard: the backdated give already happened in the past, when
-        // the storeroom's number may have been higher. Any shortfall is sorted out
-        // by the newer count that superseded it.
-        const rows = await sql`
-          with prev as (select id, name, cat from items where id = ${itemId} and not archived)
-          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-          select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
-          from prev returning id`;
-        if (!rows.length) throw new Error("That bottle is no longer in the list.");
-      } else {
-        const rows = await sql`
-          with prev as (
-            select id, name, cat from items where id = ${itemId} and not archived
-          ), upd as (
-            update items set
-              store = store - ${q},
-              patio = patio + case when ${to}::text = 'patio' then ${q}::numeric else 0 end,
-              back  = back  + case when ${to}::text = 'back'  then ${q}::numeric else 0 end,
-              patio_levels = case when ${to}::text = 'patio' then '{}'::numeric[] else patio_levels end,
-              back_levels  = case when ${to}::text = 'back'  then '{}'::numeric[] else back_levels  end
-            where id = ${itemId} and not archived and store >= ${q} returning id
-          )
-          insert into moves (type, item_id, item_name, cat, qty, loc, user_id, user_name, ts)
-          select 'give', prev.id, prev.name, prev.cat, ${q}, ${to}::text, ${u.id}, ${u.name}, ${tsIso}
-          from prev join upd on upd.id = prev.id returning id`;
-        if (!rows.length) throw new Error("Not enough in the storeroom for that give on that day.");
-      }
+      rows = skipStock
+        ? await logMoveOnly(sql, { type: "give", itemId, qty: q, loc: to, userId: u.id, userName: u.name, ts: tsIso })
+        : await applyGive(sql, { ...base, qty: q, to, extendLevels: false });
+      if (!rows.length) throw new Error(skipStock ? "That bottle is no longer in the list." : "Not enough in the storeroom for that give on that day.");
     } else {
-      // count: the STORE count. It reconciles the storeroom to the counted figure now and
-      // logs a count move dated to the chosen day. If a NEWER count already exists, don't
-      // overwrite store (that newer count is the truth); just log this one for the shift
-      // it closes.
       const v = whole(qty, "Counted amount");
-      if (skipStock) {
-        const rows = await sql`
-          with prev as (select id, name, cat, store as v from items where id = ${itemId} and not archived)
-          insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
-          select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
-          from prev returning id`;
-        if (!rows.length) throw new Error("That bottle is no longer in the list.");
-      } else {
-        const rows = await sql`
-          with prev as (
-            select id, name, cat, store as v from items where id = ${itemId} and not archived
-          ), upd as (
-            update items set store = ${v}::numeric where id = ${itemId} and not archived returning id
-          )
-          insert into moves (type, item_id, item_name, cat, loc, from_val, to_val, user_id, user_name, ts)
-          select 'count', prev.id, prev.name, prev.cat, 'store', prev.v, ${v}, ${u.id}, ${u.name}, ${tsIso}
-          from prev join upd on upd.id = prev.id returning id`;
-        if (!rows.length) throw new Error("That bottle is no longer in the list.");
-      }
+      rows = skipStock
+        ? await logMoveOnly(sql, { type: "count", itemId, value: v, loc: "store", userId: u.id, userName: u.name, ts: tsIso })
+        : await applyStoreCount(sql, { ...base, value: v });
+      if (!rows.length) throw new Error("That bottle is no longer in the list.");
     }
     refresh();
   });
