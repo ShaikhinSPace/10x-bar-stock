@@ -1,31 +1,34 @@
 <title>10X Bar Stock — Carbon Study</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,500;0,600;1,400;1,500&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <style>
   /* ===================== Carbon tokens — Gray 10 (light) ===================== */
   :root{
-    --background:#f4f4f4;
+    --background:#f7f3f2;        /* Warm Gray 10 — a cream-warm ground */
     --layer-01:#ffffff;
-    --layer-02:#f4f4f4;
-    --layer-hover:#e8e8e8;
-    --field:#f4f4f4;
+    --layer-02:#f3edeb;
+    --layer-hover:#ece4e2;
+    --field:#f3edeb;
     --field-02:#ffffff;
-    --border-subtle:#e0e0e0;
-    --border-strong:#8d8d8d;
+    --border-subtle:#e5e0df;     /* Warm Gray 20 */
+    --border-strong:#8f8b8b;     /* Warm Gray 50 */
     --border-interactive:#0f62fe;
-    --text-primary:#161616;
-    --text-secondary:#525252;
-    --text-placeholder:#a8a8a8;
-    --text-helper:#6f6f6f;
+    --text-primary:#171414;      /* Warm Gray 100 */
+    --text-secondary:#565151;    /* Warm Gray 70 */
+    --text-placeholder:#ada8a8;
+    --text-helper:#726e6e;       /* Warm Gray 60 */
     --text-on-color:#ffffff;
-    --icon-primary:#161616;
-    --icon-secondary:#525252;
+    --icon-primary:#171414;
+    --icon-secondary:#565151;
     --interactive:#0f62fe;
     --interactive-hover:#0043ce;
-    --brand-deep:#002d9c;   /* Blue 80 */
-    --brand-deeper:#001d6c; /* Blue 90 */
+    --brand-deep:#002d9c;
+    --brand-deeper:#001d6c;
     --link:#0f62fe;
+    --accent:#b4631a;            /* cognac amber — the warm character accent */
+    --accent-hover:#95500f;
+    --accent-wash:#f7e8d6;
     --support-error:#da1e28;
     --support-success:#198038;
     --support-warning:#f1c21b;
@@ -40,41 +43,49 @@
     --tag-green-bg:#a7f0ba;  --tag-green-fg:#0e6027;
     --tag-purple-bg:#e8daff; --tag-purple-fg:#6929c4;
     --tag-teal-bg:#9ef0f0;   --tag-teal-fg:#005d5d;
-    --tag-gray-bg:#e0e0e0;   --tag-gray-fg:#393939;
-    --tag-warn-bg:#fddc69;   --tag-warn-fg:#684e00;
+    --tag-gray-bg:#e5e0df;   --tag-gray-fg:#3c3838;
+    --tag-warn-bg:#f6e0b8;   --tag-warn-fg:#6b4310;
+    --tag-amber-bg:#f6e3c9;  --tag-amber-fg:#8a4d12;
 
-    --notif-warn-bg:#fdf6dd; --notif-warn-br:#f1c21b;
-    --notif-err-bg:#fff1f1;  --notif-err-br:#da1e28;
-    --notif-info-bg:#edf5ff; --notif-info-br:#0f62fe;
+    --notif-warn-bg:#faf0dc; --notif-warn-br:#b4631a;
+    --notif-err-bg:#fcecec;  --notif-err-br:#da1e28;
+    --notif-info-bg:#eef4ff; --notif-info-br:#0f62fe;
 
-    --header-bg:#161616;
-    --header-fg:#f4f4f4;
-    --header-fg-2:#c6c6c6;
-    --header-br:#393939;
+    --header-bg:#171414;
+    --header-fg:#f7f3f2;
+    --header-fg-2:#cac5c4;
+    --header-br:#3c3838;
+
+    --r-sm:4px; --r-md:8px; --r-lg:12px;
+    --shadow:0 1px 3px rgba(60,40,24,.07), 0 4px 14px -6px rgba(60,40,24,.11);
+    --shadow-lg:0 2px 6px rgba(60,40,24,.08), 0 20px 44px -18px rgba(60,40,24,.24);
   }
   :root:not([data-theme="light"]){
     @media (prefers-color-scheme: dark){
-      --background:#161616;
-      --layer-01:#262626;
-      --layer-02:#393939;
-      --layer-hover:#333333;
-      --field:#262626;
-      --field-02:#393939;
-      --border-subtle:#393939;
-      --border-strong:#6f6f6f;
+      --background:#171414;        /* Warm Gray 100 */
+      --layer-01:#272525;          /* Warm Gray 90 */
+      --layer-02:#3c3838;          /* Warm Gray 80 */
+      --layer-hover:#343030;
+      --field:#272525;
+      --field-02:#3c3838;
+      --border-subtle:#3c3838;
+      --border-strong:#726e6e;
       --border-interactive:#4589ff;
-      --text-primary:#f4f4f4;
-      --text-secondary:#c6c6c6;
-      --text-placeholder:#6f6f6f;
-      --text-helper:#8d8d8d;
+      --text-primary:#f7f3f2;
+      --text-secondary:#cac5c4;
+      --text-placeholder:#726e6e;
+      --text-helper:#8f8b8b;
       --text-on-color:#ffffff;
-      --icon-primary:#f4f4f4;
-      --icon-secondary:#c6c6c6;
+      --icon-primary:#f7f3f2;
+      --icon-secondary:#cac5c4;
       --interactive:#4589ff;
       --interactive-hover:#0f62fe;
       --brand-deep:#0f62fe;
       --brand-deeper:#002d9c;
       --link:#78a9ff;
+      --accent:#f1a74c;            /* warm amber, brighter for dark */
+      --accent-hover:#ffb95f;
+      --accent-wash:#2b2016;
       --support-error:#fa4d56;
       --support-success:#42be65;
       --support-warning:#f1c21b;
@@ -89,36 +100,48 @@
       --tag-green-bg:#0e6027;  --tag-green-fg:#a7f0ba;
       --tag-purple-bg:#6929c4; --tag-purple-fg:#e8daff;
       --tag-teal-bg:#005d5d;   --tag-teal-fg:#9ef0f0;
-      --tag-gray-bg:#525252;   --tag-gray-fg:#e0e0e0;
-      --tag-warn-bg:#8e6a00;   --tag-warn-fg:#fddc69;
+      --tag-gray-bg:#3c3838;   --tag-gray-fg:#e5e0df;
+      --tag-warn-bg:#6b4310;   --tag-warn-fg:#f6d29a;
+      --tag-amber-bg:#5a3410;  --tag-amber-fg:#f1c08a;
 
-      --notif-warn-bg:#262626; --notif-warn-br:#f1c21b;
-      --notif-err-bg:#262626;  --notif-err-br:#fa4d56;
-      --notif-info-bg:#262626; --notif-info-br:#4589ff;
+      --notif-warn-bg:#272525; --notif-warn-br:#f1a74c;
+      --notif-err-bg:#272525;  --notif-err-br:#fa4d56;
+      --notif-info-bg:#272525; --notif-info-br:#4589ff;
+
+      --header-bg:#0f0d0d;
+      --header-fg:#f7f3f2;
+      --header-fg-2:#cac5c4;
+      --header-br:#3c3838;
+
+      --shadow:0 1px 3px rgba(0,0,0,.4), 0 6px 18px -8px rgba(0,0,0,.55);
+      --shadow-lg:0 2px 6px rgba(0,0,0,.5), 0 22px 48px -18px rgba(0,0,0,.66);
     }
   }
   :root[data-theme="dark"]{
-    --background:#161616;
-    --layer-01:#262626;
-    --layer-02:#393939;
-    --layer-hover:#333333;
-    --field:#262626;
-    --field-02:#393939;
-    --border-subtle:#393939;
-    --border-strong:#6f6f6f;
+    --background:#171414;
+    --layer-01:#272525;
+    --layer-02:#3c3838;
+    --layer-hover:#343030;
+    --field:#272525;
+    --field-02:#3c3838;
+    --border-subtle:#3c3838;
+    --border-strong:#726e6e;
     --border-interactive:#4589ff;
-    --text-primary:#f4f4f4;
-    --text-secondary:#c6c6c6;
-    --text-placeholder:#6f6f6f;
-    --text-helper:#8d8d8d;
+    --text-primary:#f7f3f2;
+    --text-secondary:#cac5c4;
+    --text-placeholder:#726e6e;
+    --text-helper:#8f8b8b;
     --text-on-color:#ffffff;
-    --icon-primary:#f4f4f4;
-    --icon-secondary:#c6c6c6;
+    --icon-primary:#f7f3f2;
+    --icon-secondary:#cac5c4;
     --interactive:#4589ff;
     --interactive-hover:#0f62fe;
     --brand-deep:#0f62fe;
     --brand-deeper:#002d9c;
     --link:#78a9ff;
+    --accent:#f1a74c;
+    --accent-hover:#ffb95f;
+    --accent-wash:#2b2016;
     --support-error:#fa4d56;
     --support-success:#42be65;
     --support-warning:#f1c21b;
@@ -131,11 +154,18 @@
     --tag-green-bg:#0e6027;  --tag-green-fg:#a7f0ba;
     --tag-purple-bg:#6929c4; --tag-purple-fg:#e8daff;
     --tag-teal-bg:#005d5d;   --tag-teal-fg:#9ef0f0;
-    --tag-gray-bg:#525252;   --tag-gray-fg:#e0e0e0;
-    --tag-warn-bg:#8e6a00;   --tag-warn-fg:#fddc69;
-    --notif-warn-bg:#262626; --notif-warn-br:#f1c21b;
-    --notif-err-bg:#262626;  --notif-err-br:#fa4d56;
-    --notif-info-bg:#262626; --notif-info-br:#4589ff;
+    --tag-gray-bg:#3c3838;   --tag-gray-fg:#e5e0df;
+    --tag-warn-bg:#6b4310;   --tag-warn-fg:#f6d29a;
+    --tag-amber-bg:#5a3410;  --tag-amber-fg:#f1c08a;
+    --notif-warn-bg:#272525; --notif-warn-br:#f1a74c;
+    --notif-err-bg:#272525;  --notif-err-br:#fa4d56;
+    --notif-info-bg:#272525; --notif-info-br:#4589ff;
+    --header-bg:#0f0d0d;
+    --header-fg:#f7f3f2;
+    --header-fg-2:#cac5c4;
+    --header-br:#3c3838;
+    --shadow:0 1px 3px rgba(0,0,0,.4), 0 6px 18px -8px rgba(0,0,0,.55);
+    --shadow-lg:0 2px 6px rgba(0,0,0,.5), 0 22px 48px -18px rgba(0,0,0,.66);
   }
 
   *{box-sizing:border-box}
@@ -163,6 +193,36 @@
 
   a{color:var(--link)}
   svg{display:block}
+
+  /* ===================== character layer (warmed Carbon) ===================== */
+  /* Serif display — IBM Plex Serif gives the cold grid an editorial voice */
+  .hero h1,.sec-head h2,.dt-title,.blockttl h3,.heading-05{
+    font-family:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+  }
+  .hero h1{font-weight:400;letter-spacing:-.4px}
+  .hero h1 b{font-style:italic;font-weight:500;color:var(--interactive)}
+  .sec-head h2{font-weight:500;letter-spacing:-.2px}
+  .blockttl h3{font-size:17px;font-weight:600}
+  .dt-title{font-size:17px}
+
+  /* Amber — the warm counterpoint to royal blue */
+  .eyebrow .sq{background:var(--accent)}
+  .sec-no{color:var(--accent);font-weight:600}
+  .tag.amber{background:var(--tag-amber-bg);color:var(--tag-amber-fg)}
+  .shell .avatar{background:var(--accent);box-shadow:0 0 0 2px var(--header-bg),0 0 0 3px var(--accent)}
+  .sec-head{position:relative;padding-left:18px}
+  .sec-head::before{content:"";position:absolute;left:0;top:4px;bottom:4px;width:3px;background:var(--accent);border-radius:2px}
+
+  /* Soft radius + gentle warm shadow — friendlier than Carbon's hard edges */
+  .frame{border-radius:var(--r-md);overflow:hidden;box-shadow:var(--shadow-lg)}
+  .tile{border-radius:var(--r-md);box-shadow:var(--shadow)}
+  .g4,.mini3,.xgrid,.tokgrid{border-radius:var(--r-md);overflow:hidden;box-shadow:var(--shadow)}
+  .g4 > .tile,.mini3 .m,.xtile,.tokcell{border-radius:0;box-shadow:none}
+  .dt-wrap,.slist,.filters,.switcher,.notif,.radios{border-radius:var(--r-sm);overflow:hidden}
+  .btn{border-radius:var(--r-sm)}
+  .theme-tog{border-radius:999px}
+  .tokchip{border-radius:999px}
+  .hero{position:relative}
 
   /* ===================== UI Shell header ===================== */
   .shell{
@@ -462,7 +522,7 @@
     <p>The same 10X Bar stock app — storeroom and two bars, leakage caught between them — re-expressed in IBM's Carbon Design System. IBM Plex throughout, the 2x grid, Carbon's data tables and tiles, and one deep royal blue carried straight from the Carbon Blue ramp. Visual study only: no application logic.</p>
     <div class="tokchips">
       <span class="tokchip"><i style="background:#0f62fe"></i>$interactive · Blue&nbsp;60</span>
-      <span class="tokchip"><i style="background:#002d9c"></i>brand · Blue&nbsp;80</span>
+      <span class="tokchip"><i style="background:#b4631a"></i>accent · Cognac&nbsp;amber</span>
       <span class="tokchip"><i style="background:#007d79"></i>Patio · Teal&nbsp;60</span>
       <span class="tokchip"><i style="background:#8a3ffc"></i>Back · Purple&nbsp;60</span>
       <span class="tokchip"><i style="background:#da1e28"></i>$support-error</span>
@@ -798,7 +858,7 @@
     <div class="sec-head">
       <div class="sec-no">TOKENS</div>
       <h2 class="heading-05">The system underneath</h2>
-      <p>Colour and type map to named Carbon tokens, so the whole thing themes as a set — Gray 10 in light, Gray 100 in dark.</p>
+      <p>Colour and type map to named Carbon tokens, so the whole thing themes as a set — Warm Gray 10 in light, Warm Gray 100 in dark, amber and blue riding on top.</p>
     </div>
 
     <div class="g2" style="align-items:start;gap:32px">
@@ -806,18 +866,18 @@
         <div class="label-01" style="margin-bottom:12px">COLOR TOKENS</div>
         <div class="tokgrid">
           <div class="tokcell"><div class="sw" style="background:#0f62fe"></div><div class="nm">$interactive</div><div class="hx">Blue 60 · #0f62fe</div></div>
-          <div class="tokcell"><div class="sw" style="background:#002d9c"></div><div class="nm">brand</div><div class="hx">Blue 80 · #002d9c</div></div>
-          <div class="tokcell"><div class="sw" style="background:#f4f4f4"></div><div class="nm">$background</div><div class="hx">Gray 10 · #f4f4f4</div></div>
-          <div class="tokcell"><div class="sw" style="background:#e0e0e0"></div><div class="nm">$border-subtle</div><div class="hx">Gray 20 · #e0e0e0</div></div>
+          <div class="tokcell"><div class="sw" style="background:#b4631a"></div><div class="nm">accent</div><div class="hx">Cognac amber · #b4631a</div></div>
+          <div class="tokcell"><div class="sw" style="background:#f7f3f2"></div><div class="nm">$background</div><div class="hx">Warm Gray 10 · #f7f3f2</div></div>
+          <div class="tokcell"><div class="sw" style="background:#e5e0df"></div><div class="nm">$border-subtle</div><div class="hx">Warm Gray 20 · #e5e0df</div></div>
           <div class="tokcell"><div class="sw" style="background:#da1e28"></div><div class="nm">$support-error</div><div class="hx">Red 60 · #da1e28</div></div>
           <div class="tokcell"><div class="sw" style="background:#007d79"></div><div class="nm">Patio</div><div class="hx">Teal 60 · #007d79</div></div>
           <div class="tokcell"><div class="sw" style="background:#8a3ffc"></div><div class="nm">Back</div><div class="hx">Purple 60 · #8a3ffc</div></div>
-          <div class="tokcell"><div class="sw" style="background:#161616"></div><div class="nm">$text-primary</div><div class="hx">Gray 100 · #161616</div></div>
+          <div class="tokcell"><div class="sw" style="background:#171414"></div><div class="nm">$text-primary</div><div class="hx">Warm Gray 100 · #171414</div></div>
         </div>
       </div>
       <div>
-        <div class="label-01" style="margin-bottom:12px">TYPE SCALE · IBM PLEX SANS</div>
-        <div class="typrow"><span class="heading-06">Aa</span><span class="name">heading-06 · 42 / 300</span></div>
+        <div class="label-01" style="margin-bottom:12px">TYPE · PLEX SERIF DISPLAY + PLEX SANS</div>
+        <div class="typrow"><span class="heading-05" style="font-size:40px">Aa</span><span class="name">Plex Serif · display</span></div>
         <div class="typrow"><span class="heading-04">Heading</span><span class="name">heading-04 · 28 / 400</span></div>
         <div class="typrow"><span class="heading-02">Section heading</span><span class="name">heading-02 · 16 / 600</span></div>
         <div class="typrow"><span class="body-01">Body copy sits at fourteen pixels.</span><span class="name">body-01 · 14 / 400</span></div>
@@ -829,10 +889,12 @@
 
   <footer class="foot">
     <div class="eyebrow"><span class="sq"></span><span class="t">10X Bar · Carbon study</span></div>
-    <p class="lead body-02">This re-skins the stock app as a Carbon product: the dark UI Shell header, IBM Plex Sans and Mono, the 2x grid, data tables for anything with more than one fact per row, tiles for summaries, tags for status, and a single deep royal blue pulled straight from Carbon's Blue ramp — Blue 60 for every interactive surface, Blue 80 for brand. Partials like <b class="mono">0.25</b> and <b class="mono">1.87</b> stay first-class in Plex Mono. Semantic colour is reserved: red for out-of-stock and wastage, teal and purple only to tell the two bars apart.</p>
+    <p class="lead body-02">This is Carbon with the thermostat turned up. The bones are all still Carbon — the UI Shell header, the 2x grid, data tables, tiles, pill tags, Blue 60 for every interactive surface — but the cold neutral grey is swapped for Carbon's own <b>Warm Gray</b> ramp, headings are set in <b>IBM Plex Serif</b> for an editorial voice, corners are softened and cards lift on a gentle shadow. A <b>cognac-amber accent</b> warms the royal blue — the classic blue-and-amber pairing, and a quiet nod to what's in the bottles. Partials like <b class="mono">0.25</b> and <b class="mono">1.87</b> stay first-class in Plex Mono; red, teal and purple stay reserved for status and the two bars.</p>
     <div class="metaline">
-      SYSTEM &nbsp; <b>IBM Carbon</b> &nbsp;·&nbsp; TYPE &nbsp;<b>IBM Plex Sans / Mono</b><br>
-      THEMES &nbsp; <b>Gray 10 (light) · Gray 100 (dark)</b><br>
+      SYSTEM &nbsp; <b>IBM Carbon — warmed</b><br>
+      TYPE &nbsp;&nbsp;&nbsp; <b>IBM Plex Serif (display) · Plex Sans · Plex Mono</b><br>
+      COLOUR &nbsp; <b>Blue 60 lead · Cognac amber accent · Warm Gray neutrals</b><br>
+      THEMES &nbsp; <b>Warm Gray 10 (light) · Warm Gray 100 (dark)</b><br>
       SCOPE &nbsp;&nbsp; <b>Visual study only — no application logic</b><br>
       SCREENS &nbsp;Dashboard · Stock · Delivery · Activity · Manage
     </div>
